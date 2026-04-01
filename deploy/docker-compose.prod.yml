@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+  world-migrate:
+    build:
+      context: .
+      target: migrate
+    networks:
+      - eden_default
+    environment:
+      WORLD_DATABASE_URL: "postgresql+asyncpg://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden"
+      WORLD_DATABASE_URL_SYNC: "postgresql://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden"
+    command: >
+      sh -c "
+        sed -i 's|sqlalchemy.url = .*|sqlalchemy.url = postgresql://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden|' alembic.ini &&
+        alembic upgrade head
+      "
+
+  world-api:
+    build:
+      context: .
+      target: api
+    restart: always
+    depends_on:
+      world-migrate:
+        condition: service_completed_successfully
+    networks:
+      - eden_default
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      WORLD_DATABASE_URL: "postgresql+asyncpg://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden"
+      WORLD_DATABASE_URL_SYNC: "postgresql://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden"
+      WORLD_ANTHROPIC_API_KEY: "${WORLD_ANTHROPIC_API_KEY:-}"
+      WORLD_ANTHROPIC_MODEL: "${WORLD_ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  world-worker:
+    build:
+      context: .
+      target: worker
+    restart: always
+    depends_on:
+      world-migrate:
+        condition: service_completed_successfully
+    networks:
+      - eden_default
+    environment:
+      WORLD_DATABASE_URL: "postgresql+asyncpg://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden"
+      WORLD_DATABASE_URL_SYNC: "postgresql://eden:${POSTGRES_PASSWORD:-eden}@postgres:5432/eden"
+      WORLD_ANTHROPIC_API_KEY: "${WORLD_ANTHROPIC_API_KEY:-}"
+      WORLD_ANTHROPIC_MODEL: "${WORLD_ANTHROPIC_MODEL:-claude-sonnet-4-20250514}"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+networks:
+  eden_default:
+    external: true
