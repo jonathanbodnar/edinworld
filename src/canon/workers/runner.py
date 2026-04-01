@@ -8,8 +8,11 @@ import signal
 import sys
 
 from src.canon.workers.canon_synth_worker import CanonSynthWorker
+from src.canon.workers.canon_update_worker import CanonUpdateWorker
 from src.canon.workers.chapter_build_worker import ChapterBuildWorker
 from src.canon.workers.knowledge_prep_worker import KnowledgePrepWorker
+from src.canon.workers.narration_worker import NarrationWorker
+from src.canon.workers.world_packet_worker import WorldPacketWorker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +24,9 @@ WORKER_CLASSES = {
     "knowledge_prep": KnowledgePrepWorker,
     "canon_synth": CanonSynthWorker,
     "chapter_build": ChapterBuildWorker,
+    "narration": NarrationWorker,
+    "world_packet": WorldPacketWorker,
+    "canon_update": CanonUpdateWorker,
 }
 
 

@@ -1,13 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.canon.api.routes import actors, admin, chapters, events, places, timeline
+from src.canon.api.routes import (
+    actors, admin, changes, chapters, events, motifs,
+    narration, places, scores, timeline, world_packets,
+)
 from src.canon.config import settings
 
 app = FastAPI(
     title="Edinworld Canon API",
     description="Canon & Living World-State Engine",
-    version="0.1.0",
+    version="0.2.0",
     root_path="/world-api",
 )
 
@@ -24,6 +27,11 @@ app.include_router(actors.router, prefix="/actors", tags=["Actors"])
 app.include_router(events.router, prefix="/events", tags=["Events"])
 app.include_router(places.router, prefix="/places", tags=["Places"])
 app.include_router(timeline.router, prefix="/timeline", tags=["Timeline"])
+app.include_router(motifs.router, prefix="/motifs", tags=["Motifs"])
+app.include_router(scores.router, prefix="/scores", tags=["Scores"])
+app.include_router(narration.router, prefix="/narration-packets", tags=["Narration Packets"])
+app.include_router(world_packets.router, prefix="/world-packets", tags=["World Packets"])
+app.include_router(changes.router, prefix="/canon/changes", tags=["Changes"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 
