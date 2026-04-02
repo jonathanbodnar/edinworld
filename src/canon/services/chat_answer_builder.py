@@ -231,8 +231,8 @@ class ChatAnswerBuilder:
         for kw in keywords:
             pattern = f"%{kw}%"
             match_cases.append(
-                func.cast(SASourceRecord.canonical_title.ilike(pattern), Integer)
-                + func.cast(SASourceRecord.culture.ilike(pattern), Integer)
+                func.coalesce(func.cast(SASourceRecord.canonical_title.ilike(pattern), Integer), 0)
+                + func.coalesce(func.cast(SASourceRecord.culture.ilike(pattern), Integer), 0)
             )
         relevance = sum(match_cases).label("relevance")
 
@@ -274,7 +274,7 @@ class ChatAnswerBuilder:
                 "culture": rec.culture,
                 "excerpt": excerpt,
                 "source_type": rec.source_category,
-                "weight": float(score),
+                "weight": float(score or 1),
             })
 
         return sources
@@ -309,7 +309,7 @@ class ChatAnswerBuilder:
         for kw in keywords:
             pattern = f"%{kw}%"
             match_cases.append(
-                func.cast(SASegment.normalized_text.ilike(pattern), Integer)
+                func.coalesce(func.cast(SASegment.normalized_text.ilike(pattern), Integer), 0)
             )
         relevance = sum(match_cases).label("relevance")
 
@@ -335,7 +335,7 @@ class ChatAnswerBuilder:
             contexts.append({
                 "contextual_statement_id": seg.id,
                 "summary": excerpt,
-                "weight": float(score),
+                "weight": float(score or 1),
             })
 
         return contexts
