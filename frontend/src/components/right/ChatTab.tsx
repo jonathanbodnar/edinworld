@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useChapterContext } from '../../context/ChapterContext'
 import { useChat } from '../../hooks/useChat'
 import AnswerCard from './AnswerCard'
+import FormattedText from './FormattedText'
 
 export default function ChatTab() {
   const { activeChapterId, chapterDetail } = useChapterContext()
@@ -88,9 +89,11 @@ export default function ChatTab() {
                 background: msg.role === 'user' ? 'var(--accent)' : 'var(--bg-tertiary)',
                 color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
                 fontSize: '13px',
-                lineHeight: 1.5,
+                lineHeight: 1.6,
               }}>
-                {msg.content}
+                {msg.role === 'assistant'
+                  ? <FormattedText text={msg.content} />
+                  : msg.content}
               </div>
             </div>
 
