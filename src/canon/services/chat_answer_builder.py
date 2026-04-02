@@ -8,7 +8,7 @@ import logging
 import re
 import uuid
 
-from sqlalchemy import or_, select, text as sa_text
+from sqlalchemy import Integer, func, or_, select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.canon.config import settings
@@ -81,10 +81,28 @@ STOP_WORDS = {
 
 
 def _extract_keywords(query: str) -> list[str]:
-    """Extract meaningful search keywords from a natural language query."""
+    """Extract meaningful search keywords from a natural language query,
+    with basic stemming to improve ILIKE matching."""
     words = re.findall(r"[a-zA-ZÀ-ÿ'ʼ]{2,}", query.lower())
     keywords = [w for w in words if w not in STOP_WORDS]
-    return keywords[:10]
+
+    stemmed: list[str] = []
+    for w in keywords:
+        stem = w
+        if stem.endswith("ies") and len(stem) > 4:
+            stem = stem[:-3] + "y"
+        elif stem.endswith("es") and len(stem) > 4:
+            stem = stem[:-2]
+        elif stem.endswith("s") and not stem.endswith("ss") and len(stem) > 3:
+            stem = stem[:-1]
+        if stem.endswith("ing") and len(stem) > 5:
+            stem = stem[:-3]
+        if stem not in stemmed:
+            stemmed.append(stem)
+        if w != stem and w not in stemmed:
+            stemmed.append(w)
+
+    return stemmed[:12]
 
 
 class ChatAnswerBuilder:
@@ -206,35 +224,57 @@ class ChatAnswerBuilder:
                 })
             return sources
 
-        conditions = []
-        for kw in keywords:
-            pattern = f"%{kw}%"
-            conditions.append(SASourceRecord.canonical_title.ilike(pattern))
-            conditions.append(SASourceRecord.culture.ilike(pattern))
-
-        if not conditions:
+        if not keywords:
             return []
 
+        match_cases = []
+        for kw in keywords:
+            pattern = f"%{kw}%"
+            match_cases.append(
+                func.cast(SASourceRecord.canonical_title.ilike(pattern), Integer)
+                + func.cast(SASourceRecord.culture.ilike(pattern), Integer)
+            )
+        relevance = sum(match_cases).label("relevance")
+
+        any_conditions = []
+        for kw in keywords:
+            pattern = f"%{kw}%"
+            any_conditions.append(SASourceRecord.canonical_title.ilike(pattern))
+            any_conditions.append(SASourceRecord.culture.ilike(pattern))
+
         q = (
-            select(SASourceRecord)
-            .where(or_(*conditions))
+            select(SASourceRecord, relevance)
+            .where(or_(*any_conditions))
+            .order_by(relevance.desc())
             .limit(15)
         )
-        records = (await session.execute(q)).scalars().all()
+        rows = (await session.execute(q)).all()
 
         sources = []
         seen: set[uuid.UUID] = set()
-        for rec in records:
+        for rec, score in rows:
             if rec.id in seen:
                 continue
             seen.add(rec.id)
+
+            excerpt = ""
+            ver_q = (
+                select(SASourceVersion)
+                .where(SASourceVersion.source_record_id == rec.id)
+                .where(SASourceVersion.text_extracted.isnot(None))
+                .limit(1)
+            )
+            ver = (await session.execute(ver_q)).scalar_one_or_none()
+            if ver and ver.text_extracted:
+                excerpt = ver.text_extracted[:500]
+
             sources.append({
                 "source_record_id": rec.id,
                 "title": rec.canonical_title,
                 "culture": rec.culture,
-                "excerpt": "",
+                "excerpt": excerpt,
                 "source_type": rec.source_category,
-                "weight": 1.0,
+                "weight": float(score),
             })
 
         return sources
@@ -262,32 +302,40 @@ class ChatAnswerBuilder:
                 })
             return contexts
 
-        conditions = []
-        for kw in keywords:
-            pattern = f"%{kw}%"
-            conditions.append(SASegment.normalized_text.ilike(pattern))
-            conditions.append(SASegment.original_text.ilike(pattern))
-
-        if not conditions:
+        if not keywords:
             return []
 
+        match_cases = []
+        for kw in keywords:
+            pattern = f"%{kw}%"
+            match_cases.append(
+                func.cast(SASegment.normalized_text.ilike(pattern), Integer)
+            )
+        relevance = sum(match_cases).label("relevance")
+
+        any_conditions = []
+        for kw in keywords:
+            pattern = f"%{kw}%"
+            any_conditions.append(SASegment.normalized_text.ilike(pattern))
+
         q = (
-            select(SASegment)
-            .where(or_(*conditions))
+            select(SASegment, relevance)
+            .where(or_(*any_conditions))
             .where(SASegment.normalized_text.isnot(None))
             .where(SASegment.normalized_text != "")
+            .order_by(relevance.desc())
             .limit(15)
         )
-        segments = (await session.execute(q)).scalars().all()
+        rows = (await session.execute(q)).all()
 
         contexts = []
-        for seg in segments:
+        for seg, score in rows:
             text = seg.normalized_text or seg.original_text or ""
             excerpt = text[:600]
             contexts.append({
                 "contextual_statement_id": seg.id,
                 "summary": excerpt,
-                "weight": 1.0,
+                "weight": float(score),
             })
 
         return contexts
@@ -301,8 +349,9 @@ class ChatAnswerBuilder:
                 culture = f" ({s['culture']})" if s.get("culture") else ""
                 parts.append(f"[Source {i}] {s['title']}{culture}")
                 if s.get("excerpt"):
-                    parts.append(f"  Content: {s['excerpt'][:400]}")
+                    parts.append(f"  Content: {s['excerpt'][:600]}")
                 parts.append(f"  Category: {s.get('source_type', 'unknown')}")
+                parts.append(f"  Relevance weight: {s.get('weight', 0)}")
                 parts.append("")
 
         if contexts:
