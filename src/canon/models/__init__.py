@@ -2,6 +2,8 @@ from src.canon.models.base import Base
 from src.canon.models.enums import *  # noqa: F403
 from src.canon.models.system_a import (
     SAContextualStatement,
+    SADiscoveredRecord,
+    SAObjectImage,
     SARawObject,
     SASegment,
     SASourceDate,
@@ -25,6 +27,13 @@ from src.canon.models.narration_packet import NarrationPacket
 from src.canon.models.world_packet import WorldPacket
 from src.canon.models.change_event import ChangeEvent, CanonUpdateTarget
 from src.canon.models.world_job import WorldQueuedJob, WorldJobCheckpoint
+from src.canon.models.chapter_source_set import ChapterSourceSet
+from src.canon.models.chapter_context_set import ChapterContextSet
+from src.canon.models.chapter_artifact_set import ChapterArtifactSet
+from src.canon.models.chapter_image_set import ChapterImageSet
+from src.canon.models.chapter_focus_object import ChapterFocusObject
+from src.canon.models.chat_session import ChatSession, ChatMessage
+from src.canon.models.answer_packet import AnswerPacket, AnswerPacketSource, AnswerPacketContext
 
 __all__ = [
     "Base",
@@ -35,6 +44,8 @@ __all__ = [
     "SASegment",
     "SAContextualStatement",
     "SARawObject",
+    "SAObjectImage",
+    "SADiscoveredRecord",
     "ExtractedHint",
     "CanonicalEpoch",
     "CanonicalChapter",
@@ -54,4 +65,14 @@ __all__ = [
     "CanonUpdateTarget",
     "WorldQueuedJob",
     "WorldJobCheckpoint",
+    "ChapterSourceSet",
+    "ChapterContextSet",
+    "ChapterArtifactSet",
+    "ChapterImageSet",
+    "ChapterFocusObject",
+    "ChatSession",
+    "ChatMessage",
+    "AnswerPacket",
+    "AnswerPacketSource",
+    "AnswerPacketContext",
 ]

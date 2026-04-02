@@ -29,6 +29,7 @@ from src.canon.services.merge_service import MergeService
 from src.canon.services.motif_service import MotifService
 from src.canon.services.narration_builder import NarrationBuilderService
 from src.canon.services.scoring_service import ScoringService
+from src.canon.services.evidence_bundle_builder import EvidenceBundleBuilder
 from src.canon.services.world_packet_builder import WorldPacketBuilderService
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,11 @@ async def run_synthesis(
     if request.run_canon_updates:
         svc = CanonUpdateService()
         result.canon_updates = await svc.process_all_pending(session)
+        await session.commit()
+
+    if request.run_evidence_bundles:
+        svc = EvidenceBundleBuilder()
+        result.evidence_bundles = await svc.build_all(session)
         await session.commit()
 
     return result

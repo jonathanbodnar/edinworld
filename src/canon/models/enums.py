@@ -109,3 +109,16 @@ class UpdateTargetStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class ChatRole(str, enum.Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class AnswerMode(str, enum.Enum):
+    SOURCE = "source"
+    CONTEXT = "context"
+    SYNTHESIS = "synthesis"
+    UNSUPPORTED = "unsupported"

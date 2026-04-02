@@ -96,3 +96,32 @@ class SARawObject(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     trusted_source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    external_id: Mapped[str | None] = mapped_column(String(1024))
+    source_url: Mapped[str | None] = mapped_column(String(4096))
+    content_type: Mapped[str | None] = mapped_column(String(256))
+    r2_key: Mapped[str | None] = mapped_column(String(2048))
+
+
+class SAObjectImage(Base):
+    __tablename__ = "object_images"
+    __table_args__ = {"extend_existing": True}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    raw_object_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    trusted_source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    image_url: Mapped[str] = mapped_column(Text)
+    r2_key: Mapped[str | None] = mapped_column(String(2048))
+    alt_text: Mapped[str | None] = mapped_column(Text)
+    caption: Mapped[str | None] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(String(256))
+    image_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SADiscoveredRecord(Base):
+    __tablename__ = "discovered_records"
+    __table_args__ = {"extend_existing": True}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    trusted_source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    title_hint: Mapped[str | None] = mapped_column(Text)
+    record_url: Mapped[str | None] = mapped_column(String(4096))

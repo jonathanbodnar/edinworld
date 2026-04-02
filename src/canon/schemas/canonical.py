@@ -243,6 +243,125 @@ class ChangeEventResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ChapterSourceSetResponse(BaseModel):
+    id: uuid.UUID
+    chapter_id: uuid.UUID
+    source_record_id: uuid.UUID
+    title: str | None = None
+    excerpt: str | None = None
+    relevance_weight: float
+    image_ref: str | None = None
+    source_type: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ChapterContextSetResponse(BaseModel):
+    id: uuid.UUID
+    chapter_id: uuid.UUID
+    contextual_statement_id: uuid.UUID
+    summary: str | None = None
+    artifact_description: str | None = None
+    relevance_weight: float
+
+    model_config = {"from_attributes": True}
+
+
+class ChapterArtifactSetResponse(BaseModel):
+    id: uuid.UUID
+    chapter_id: uuid.UUID
+    raw_object_id: uuid.UUID
+    title: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+    location: str | None = None
+    date_label: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ChapterImageSetResponse(BaseModel):
+    id: uuid.UUID
+    chapter_id: uuid.UUID
+    object_image_id: uuid.UUID | None = None
+    image_url: str | None = None
+    caption: str | None = None
+    image_type: str | None = None
+    display_order: int
+
+    model_config = {"from_attributes": True}
+
+
+class ChapterFocusObjectResponse(BaseModel):
+    id: uuid.UUID
+    chapter_id: uuid.UUID
+    object_type: str
+    object_id: uuid.UUID
+    focus_reason: str | None = None
+    display_order: int
+
+    model_config = {"from_attributes": True}
+
+
+class EpochWithCountResponse(EpochResponse):
+    chapter_count: int = 0
+
+
+class ChatQueryRequest(BaseModel):
+    query: str
+    chapter_id: uuid.UUID | None = None
+    session_id: uuid.UUID | None = None
+
+
+class ChatQueryResponse(BaseModel):
+    session_id: str
+    answer_packet_id: str
+    answer: str
+    answer_mode: str
+    confidence: float
+    sources: list[dict] = []
+    contexts: list[dict] = []
+
+
+class ChatSessionResponse(BaseModel):
+    id: uuid.UUID
+    chapter_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    message_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ChatMessageResponse(BaseModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    role: str
+    content: str
+    answer_packet_id: uuid.UUID | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChatSessionDetailResponse(ChatSessionResponse):
+    messages: list[ChatMessageResponse] = []
+
+
+class AnswerPacketResponse(BaseModel):
+    id: uuid.UUID
+    query: str
+    chapter_id: uuid.UUID | None = None
+    answer_mode: str
+    answer_summary: str
+    confidence: float
+    created_at: datetime
+    sources: list[dict] = []
+    contexts: list[dict] = []
+
+    model_config = {"from_attributes": True}
+
+
 class SynthesisRequest(BaseModel):
     run_extraction: bool = True
     run_synthesis: bool = True
@@ -254,6 +373,7 @@ class SynthesisRequest(BaseModel):
     run_change_detection: bool = False
     run_impact_resolution: bool = False
     run_canon_updates: bool = False
+    run_evidence_bundles: bool = False
 
 
 class SynthesisResponse(BaseModel):
@@ -267,6 +387,7 @@ class SynthesisResponse(BaseModel):
     change_detection: dict | None = None
     impact_resolution: dict | None = None
     canon_updates: dict | None = None
+    evidence_bundles: dict | None = None
     status: str = "completed"
 
 

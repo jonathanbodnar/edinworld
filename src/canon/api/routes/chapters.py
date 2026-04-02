@@ -13,10 +13,20 @@ from src.canon.models.canonical_event import CanonicalEvent
 from src.canon.models.canonical_place import CanonicalPlace
 from src.canon.models.canon_dependency import CanonDependency
 from src.canon.models.enums import CanonicalType
+from src.canon.models.chapter_artifact_set import ChapterArtifactSet
+from src.canon.models.chapter_context_set import ChapterContextSet
+from src.canon.models.chapter_focus_object import ChapterFocusObject
+from src.canon.models.chapter_image_set import ChapterImageSet
+from src.canon.models.chapter_source_set import ChapterSourceSet
 from src.canon.schemas.canonical import (
     ActorResponse,
+    ChapterArtifactSetResponse,
+    ChapterContextSetResponse,
     ChapterDetailResponse,
+    ChapterFocusObjectResponse,
+    ChapterImageSetResponse,
     ChapterResponse,
+    ChapterSourceSetResponse,
     EventResponse,
     PlaceResponse,
 )
@@ -84,3 +94,64 @@ async def get_chapter(
         events=events,
         places=places,
     )
+
+
+@router.get("/{chapter_id}/sources", response_model=list[ChapterSourceSetResponse])
+async def get_chapter_sources(
+    chapter_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    q = (
+        select(ChapterSourceSet)
+        .where(ChapterSourceSet.chapter_id == chapter_id)
+        .order_by(ChapterSourceSet.relevance_weight.desc())
+    )
+    return [ChapterSourceSetResponse.model_validate(r) for r in (await session.execute(q)).scalars().all()]
+
+
+@router.get("/{chapter_id}/context", response_model=list[ChapterContextSetResponse])
+async def get_chapter_context(
+    chapter_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    q = (
+        select(ChapterContextSet)
+        .where(ChapterContextSet.chapter_id == chapter_id)
+        .order_by(ChapterContextSet.relevance_weight.desc())
+    )
+    return [ChapterContextSetResponse.model_validate(r) for r in (await session.execute(q)).scalars().all()]
+
+
+@router.get("/{chapter_id}/artifacts", response_model=list[ChapterArtifactSetResponse])
+async def get_chapter_artifacts(
+    chapter_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    q = select(ChapterArtifactSet).where(ChapterArtifactSet.chapter_id == chapter_id)
+    return [ChapterArtifactSetResponse.model_validate(r) for r in (await session.execute(q)).scalars().all()]
+
+
+@router.get("/{chapter_id}/images", response_model=list[ChapterImageSetResponse])
+async def get_chapter_images(
+    chapter_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    q = (
+        select(ChapterImageSet)
+        .where(ChapterImageSet.chapter_id == chapter_id)
+        .order_by(ChapterImageSet.display_order)
+    )
+    return [ChapterImageSetResponse.model_validate(r) for r in (await session.execute(q)).scalars().all()]
+
+
+@router.get("/{chapter_id}/focus-objects", response_model=list[ChapterFocusObjectResponse])
+async def get_chapter_focus_objects(
+    chapter_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    q = (
+        select(ChapterFocusObject)
+        .where(ChapterFocusObject.chapter_id == chapter_id)
+        .order_by(ChapterFocusObject.display_order)
+    )
+    return [ChapterFocusObjectResponse.model_validate(r) for r in (await session.execute(q)).scalars().all()]
