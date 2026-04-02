@@ -52,21 +52,22 @@ export default function RightPanel() {
         ))}
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {!activeChapterId ? (
+      <div style={{ flex: 1, overflowY: activeTab === 'chat' ? 'hidden' : 'auto' }}>
+        {activeTab === 'chat' ? (
+          <ChatTab />
+        ) : !activeChapterId ? (
           <div style={{
             padding: '40px 20px',
             textAlign: 'center',
             color: 'var(--text-muted)',
             fontSize: '13px',
           }}>
-            Select a chapter to view evidence, context, and interact with the research assistant.
+            Select a chapter to view evidence and context.
           </div>
         ) : (
           <>
             {activeTab === 'evidence' && <EvidenceTab />}
             {activeTab === 'context' && <ContextTab />}
-            {activeTab === 'chat' && <ChatTab />}
           </>
         )}
       </div>

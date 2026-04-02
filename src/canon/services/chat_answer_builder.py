@@ -154,22 +154,32 @@ class ChatAnswerBuilder:
     async def _retrieve_evidence(
         self, session: AsyncSession, chapter_id: uuid.UUID | None
     ) -> tuple[list[dict], list[dict]]:
-        """Retrieve source and context evidence for a chapter."""
+        """Retrieve source and context evidence. When chapter_id is given, scopes
+        to that chapter's bundles. Otherwise searches across all bundles and
+        falls back to querying System A directly."""
         sources = []
         contexts = []
 
-        if not chapter_id:
-            return sources, contexts
-
-        src_q = (
-            select(ChapterSourceSet)
-            .where(ChapterSourceSet.chapter_id == chapter_id)
-            .order_by(ChapterSourceSet.relevance_weight.desc())
-            .limit(20)
-        )
+        if chapter_id:
+            src_q = (
+                select(ChapterSourceSet)
+                .where(ChapterSourceSet.chapter_id == chapter_id)
+                .order_by(ChapterSourceSet.relevance_weight.desc())
+                .limit(20)
+            )
+        else:
+            src_q = (
+                select(ChapterSourceSet)
+                .order_by(ChapterSourceSet.relevance_weight.desc())
+                .limit(30)
+            )
         src_rows = (await session.execute(src_q)).scalars().all()
 
+        seen_source_ids: set[uuid.UUID] = set()
         for row in src_rows:
+            if row.source_record_id in seen_source_ids:
+                continue
+            seen_source_ids.add(row.source_record_id)
             record = await session.get(SASourceRecord, row.source_record_id)
             sources.append({
                 "source_record_id": row.source_record_id,
@@ -179,20 +189,63 @@ class ChatAnswerBuilder:
                 "weight": row.relevance_weight,
             })
 
-        ctx_q = (
-            select(ChapterContextSet)
-            .where(ChapterContextSet.chapter_id == chapter_id)
-            .order_by(ChapterContextSet.relevance_weight.desc())
-            .limit(20)
-        )
+        if chapter_id:
+            ctx_q = (
+                select(ChapterContextSet)
+                .where(ChapterContextSet.chapter_id == chapter_id)
+                .order_by(ChapterContextSet.relevance_weight.desc())
+                .limit(20)
+            )
+        else:
+            ctx_q = (
+                select(ChapterContextSet)
+                .order_by(ChapterContextSet.relevance_weight.desc())
+                .limit(30)
+            )
         ctx_rows = (await session.execute(ctx_q)).scalars().all()
 
+        seen_stmt_ids: set[uuid.UUID] = set()
         for row in ctx_rows:
+            if row.contextual_statement_id in seen_stmt_ids:
+                continue
+            seen_stmt_ids.add(row.contextual_statement_id)
             stmt = await session.get(SAContextualStatement, row.contextual_statement_id)
             contexts.append({
                 "contextual_statement_id": row.contextual_statement_id,
                 "summary": row.summary or (stmt.statement_text[:500] if stmt and stmt.statement_text else ""),
                 "weight": row.relevance_weight,
+            })
+
+        if not sources and not contexts:
+            sources, contexts = await self._retrieve_from_system_a(session)
+
+        return sources, contexts
+
+    async def _retrieve_from_system_a(
+        self, session: AsyncSession
+    ) -> tuple[list[dict], list[dict]]:
+        """Fallback: query System A tables directly when no chapter bundles exist."""
+        sources = []
+        contexts = []
+
+        src_q = select(SASourceRecord).limit(20)
+        records = (await session.execute(src_q)).scalars().all()
+        for rec in records:
+            sources.append({
+                "source_record_id": rec.id,
+                "title": rec.canonical_title,
+                "excerpt": "",
+                "source_type": rec.source_category,
+                "weight": 1.0,
+            })
+
+        ctx_q = select(SAContextualStatement).limit(20)
+        stmts = (await session.execute(ctx_q)).scalars().all()
+        for stmt in stmts:
+            contexts.append({
+                "contextual_statement_id": stmt.id,
+                "summary": stmt.statement_text[:500] if stmt.statement_text else "",
+                "weight": 1.0,
             })
 
         return sources, contexts

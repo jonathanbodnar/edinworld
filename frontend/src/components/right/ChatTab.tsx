@@ -33,10 +33,26 @@ export default function ChatTab() {
         fontSize: '12px',
         color: 'var(--text-muted)',
         flexShrink: 0,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
       }}>
-        {chapterDetail
-          ? `Ask about: ${chapterDetail.title}`
-          : 'Research Assistant'}
+        <span>
+          {chapterDetail
+            ? `Research Assistant · ${chapterDetail.title}`
+            : 'Research Assistant'}
+        </span>
+        {chapterDetail && (
+          <span style={{
+            fontSize: '10px',
+            padding: '2px 6px',
+            borderRadius: '3px',
+            background: 'rgba(99, 102, 241, 0.15)',
+            color: 'var(--accent)',
+          }}>
+            chapter focus
+          </span>
+        )}
       </div>
 
       <div style={{
@@ -51,9 +67,10 @@ export default function ChatTab() {
             color: 'var(--text-muted)',
             fontSize: '13px',
           }}>
-            <p>Ask a question about this chapter's history, actors, or events.</p>
+            <p>Ask about history, mythology, actors, events, or places.</p>
             <p style={{ marginTop: '8px', fontSize: '11px' }}>
               Answers are grounded in source evidence.
+              {chapterDetail && ' Focused on the selected chapter.'}
             </p>
           </div>
         )}
