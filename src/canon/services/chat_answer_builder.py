@@ -1,13 +1,14 @@
-"""ChatAnswerBuilder: receives a user query, retrieves evidence from chapter bundles,
-calls Anthropic for a grounded answer, creates answer_packets with linked sources/context."""
+"""ChatAnswerBuilder: receives a user query, retrieves relevant evidence using
+text search across System A data and chapter bundles, calls Anthropic for a
+grounded answer, creates answer_packets with linked sources/context."""
 
 from __future__ import annotations
 
-import json
 import logging
+import re
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.canon.config import settings
@@ -16,45 +17,39 @@ from src.canon.models.chapter_context_set import ChapterContextSet
 from src.canon.models.chapter_source_set import ChapterSourceSet
 from src.canon.models.chat_session import ChatMessage, ChatSession
 from src.canon.models.enums import AnswerMode, ChatRole
-from src.canon.models.system_a import SAContextualStatement, SASourceRecord
+from src.canon.models.system_a import SAContextualStatement, SASegment, SASourceRecord, SASourceVersion
 
 logger = logging.getLogger(__name__)
 
-CHAT_SYSTEM_PROMPT = """You are a scholarly research assistant specializing in ancient history and mythology.
-You answer questions based ONLY on the provided source evidence and contextual statements.
-If the evidence is insufficient, say so honestly.
+CHAT_SYSTEM_PROMPT = """You are a scholarly research assistant for an ancient history and mythology research platform called Edinworld.
+The platform contains source records, text segments, and contextual analysis from museums, text corpora, and historical archives.
+
+You answer questions using the provided source evidence: source records (with titles, culture, category) and text segments (actual content from these sources).
 
 Rules:
-- Ground every claim in a specific source or statement from the evidence provided.
-- When referencing a source, mention it by title.
+- Use the evidence provided to construct the best answer you can.
+- When referencing a source, mention it by title and culture.
+- Quote relevant text segments when they directly support a point.
 - If multiple sources disagree, present both perspectives.
-- Never fabricate information not present in the evidence.
-- Be concise but thorough.
+- If the evidence is only partially relevant, answer what you can and note what's missing.
+- If NO evidence is relevant, explain what kinds of sources would be needed and suggest the user try different search terms.
+- Be conversational, concise, and scholarly.
 
-Respond with a JSON object:
-{
-  "answer": "your answer text",
-  "confidence": 0.0-1.0,
-  "answer_mode": "source|context|synthesis|unsupported",
-  "referenced_source_indices": [0, 1],
-  "referenced_context_indices": [0, 2]
-}
-
-answer_mode values:
-- "source": answer is directly supported by primary sources
-- "context": answer relies on scholarly context/interpretation
-- "synthesis": answer synthesizes multiple sources
-- "unsupported": evidence is insufficient to answer"""
+Respond using the provide_answer tool."""
 
 ANSWER_TOOL = {
     "name": "provide_answer",
-    "description": "Provide a grounded answer to the user's question based on the evidence.",
+    "description": "Provide an answer to the user's question based on the evidence.",
     "input_schema": {
         "type": "object",
         "properties": {
             "answer": {"type": "string", "description": "The answer text"},
             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-            "answer_mode": {"type": "string", "enum": ["source", "context", "synthesis", "unsupported"]},
+            "answer_mode": {
+                "type": "string",
+                "enum": ["source", "context", "synthesis", "unsupported"],
+                "description": "source=directly backed by primary sources, context=based on scholarly interpretation, synthesis=combines multiple sources, unsupported=insufficient evidence",
+            },
             "referenced_source_indices": {
                 "type": "array",
                 "items": {"type": "integer"},
@@ -63,12 +58,33 @@ ANSWER_TOOL = {
             "referenced_context_indices": {
                 "type": "array",
                 "items": {"type": "integer"},
-                "description": "Indices into the context list that support this answer",
+                "description": "Indices into the contexts list that support this answer",
             },
         },
         "required": ["answer", "confidence", "answer_mode"],
     },
 }
+
+STOP_WORDS = {
+    "the", "a", "an", "is", "was", "were", "are", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "of", "in", "to", "for",
+    "with", "on", "at", "from", "by", "about", "as", "into", "through",
+    "during", "before", "after", "above", "below", "between", "and", "but",
+    "or", "not", "no", "so", "if", "then", "than", "too", "very", "just",
+    "that", "this", "these", "those", "it", "its", "what", "which", "who",
+    "whom", "how", "when", "where", "why", "all", "each", "every", "both",
+    "few", "more", "most", "other", "some", "such", "any", "only", "own",
+    "same", "tell", "me", "i", "my", "you", "your", "we", "our", "they",
+    "their", "there", "here", "up", "out", "many", "much",
+}
+
+
+def _extract_keywords(query: str) -> list[str]:
+    """Extract meaningful search keywords from a natural language query."""
+    words = re.findall(r"[a-zA-ZÀ-ÿ'ʼ]{2,}", query.lower())
+    keywords = [w for w in words if w not in STOP_WORDS]
+    return keywords[:10]
 
 
 class ChatAnswerBuilder:
@@ -105,7 +121,7 @@ class ChatAnswerBuilder:
         )
         session.add(user_msg)
 
-        sources, contexts = await self._retrieve_evidence(session, chapter_id)
+        sources, contexts = await self._retrieve_evidence(session, query, chapter_id)
 
         if not sources and not contexts:
             answer_packet = await self._create_unsupported_packet(session, query, chapter_id)
@@ -152,121 +168,151 @@ class ChatAnswerBuilder:
         }
 
     async def _retrieve_evidence(
-        self, session: AsyncSession, chapter_id: uuid.UUID | None
+        self, session: AsyncSession, query: str, chapter_id: uuid.UUID | None
     ) -> tuple[list[dict], list[dict]]:
-        """Retrieve source and context evidence. When chapter_id is given, scopes
-        to that chapter's bundles. Otherwise searches across all bundles and
-        falls back to querying System A directly."""
-        sources = []
-        contexts = []
+        """Query-aware evidence retrieval: searches source records by title/culture
+        and segments by text content, using keywords from the user's question."""
+        keywords = _extract_keywords(query)
+        if not keywords:
+            keywords = query.lower().split()[:5]
 
+        sources = await self._search_source_records(session, keywords, chapter_id)
+        contexts = await self._search_segments(session, keywords, chapter_id)
+
+        return sources, contexts
+
+    async def _search_source_records(
+        self, session: AsyncSession, keywords: list[str], chapter_id: uuid.UUID | None
+    ) -> list[dict]:
+        """Search source_records by matching keywords against title, culture, and category."""
         if chapter_id:
             src_q = (
                 select(ChapterSourceSet)
                 .where(ChapterSourceSet.chapter_id == chapter_id)
                 .order_by(ChapterSourceSet.relevance_weight.desc())
-                .limit(20)
+                .limit(15)
             )
-        else:
-            src_q = (
-                select(ChapterSourceSet)
-                .order_by(ChapterSourceSet.relevance_weight.desc())
-                .limit(30)
-            )
-        src_rows = (await session.execute(src_q)).scalars().all()
+            rows = (await session.execute(src_q)).scalars().all()
+            sources = []
+            for row in rows:
+                record = await session.get(SASourceRecord, row.source_record_id)
+                sources.append({
+                    "source_record_id": row.source_record_id,
+                    "title": row.title or (record.canonical_title if record else "Unknown"),
+                    "culture": record.culture if record else None,
+                    "excerpt": row.excerpt or "",
+                    "source_type": row.source_type,
+                    "weight": row.relevance_weight,
+                })
+            return sources
 
-        seen_source_ids: set[uuid.UUID] = set()
-        for row in src_rows:
-            if row.source_record_id in seen_source_ids:
-                continue
-            seen_source_ids.add(row.source_record_id)
-            record = await session.get(SASourceRecord, row.source_record_id)
-            sources.append({
-                "source_record_id": row.source_record_id,
-                "title": row.title or (record.canonical_title if record else "Unknown"),
-                "excerpt": row.excerpt or "",
-                "source_type": row.source_type,
-                "weight": row.relevance_weight,
-            })
+        conditions = []
+        for kw in keywords:
+            pattern = f"%{kw}%"
+            conditions.append(SASourceRecord.canonical_title.ilike(pattern))
+            conditions.append(SASourceRecord.culture.ilike(pattern))
 
-        if chapter_id:
-            ctx_q = (
-                select(ChapterContextSet)
-                .where(ChapterContextSet.chapter_id == chapter_id)
-                .order_by(ChapterContextSet.relevance_weight.desc())
-                .limit(20)
-            )
-        else:
-            ctx_q = (
-                select(ChapterContextSet)
-                .order_by(ChapterContextSet.relevance_weight.desc())
-                .limit(30)
-            )
-        ctx_rows = (await session.execute(ctx_q)).scalars().all()
+        if not conditions:
+            return []
 
-        seen_stmt_ids: set[uuid.UUID] = set()
-        for row in ctx_rows:
-            if row.contextual_statement_id in seen_stmt_ids:
-                continue
-            seen_stmt_ids.add(row.contextual_statement_id)
-            stmt = await session.get(SAContextualStatement, row.contextual_statement_id)
-            contexts.append({
-                "contextual_statement_id": row.contextual_statement_id,
-                "summary": row.summary or (stmt.statement_text[:500] if stmt and stmt.statement_text else ""),
-                "weight": row.relevance_weight,
-            })
+        q = (
+            select(SASourceRecord)
+            .where(or_(*conditions))
+            .limit(15)
+        )
+        records = (await session.execute(q)).scalars().all()
 
-        if not sources and not contexts:
-            sources, contexts = await self._retrieve_from_system_a(session)
-
-        return sources, contexts
-
-    async def _retrieve_from_system_a(
-        self, session: AsyncSession
-    ) -> tuple[list[dict], list[dict]]:
-        """Fallback: query System A tables directly when no chapter bundles exist."""
         sources = []
-        contexts = []
-
-        src_q = select(SASourceRecord).limit(20)
-        records = (await session.execute(src_q)).scalars().all()
+        seen: set[uuid.UUID] = set()
         for rec in records:
+            if rec.id in seen:
+                continue
+            seen.add(rec.id)
             sources.append({
                 "source_record_id": rec.id,
                 "title": rec.canonical_title,
+                "culture": rec.culture,
                 "excerpt": "",
                 "source_type": rec.source_category,
                 "weight": 1.0,
             })
 
-        ctx_q = select(SAContextualStatement).limit(20)
-        stmts = (await session.execute(ctx_q)).scalars().all()
-        for stmt in stmts:
+        return sources
+
+    async def _search_segments(
+        self, session: AsyncSession, keywords: list[str], chapter_id: uuid.UUID | None
+    ) -> list[dict]:
+        """Search segments by matching keywords against normalized_text, and
+        return them as context entries with actual text excerpts."""
+        if chapter_id:
+            ctx_q = (
+                select(ChapterContextSet)
+                .where(ChapterContextSet.chapter_id == chapter_id)
+                .order_by(ChapterContextSet.relevance_weight.desc())
+                .limit(10)
+            )
+            rows = (await session.execute(ctx_q)).scalars().all()
+            contexts = []
+            for row in rows:
+                stmt = await session.get(SAContextualStatement, row.contextual_statement_id)
+                contexts.append({
+                    "contextual_statement_id": row.contextual_statement_id,
+                    "summary": row.summary or (stmt.statement_text[:500] if stmt and stmt.statement_text else ""),
+                    "weight": row.relevance_weight,
+                })
+            return contexts
+
+        conditions = []
+        for kw in keywords:
+            pattern = f"%{kw}%"
+            conditions.append(SASegment.normalized_text.ilike(pattern))
+            conditions.append(SASegment.original_text.ilike(pattern))
+
+        if not conditions:
+            return []
+
+        q = (
+            select(SASegment)
+            .where(or_(*conditions))
+            .where(SASegment.normalized_text.isnot(None))
+            .where(SASegment.normalized_text != "")
+            .limit(15)
+        )
+        segments = (await session.execute(q)).scalars().all()
+
+        contexts = []
+        for seg in segments:
+            text = seg.normalized_text or seg.original_text or ""
+            excerpt = text[:600]
             contexts.append({
-                "contextual_statement_id": stmt.id,
-                "summary": stmt.statement_text[:500] if stmt.statement_text else "",
+                "contextual_statement_id": seg.id,
+                "summary": excerpt,
                 "weight": 1.0,
             })
 
-        return sources, contexts
+        return contexts
 
     def _build_evidence_prompt(self, query: str, sources: list[dict], contexts: list[dict]) -> str:
-        parts = [f"Question: {query}\n"]
+        parts = [f"User question: {query}\n"]
 
         if sources:
-            parts.append("== Primary Sources ==")
+            parts.append("== Source Records ==")
             for i, s in enumerate(sources):
-                parts.append(f"[Source {i}] {s['title']}")
+                culture = f" ({s['culture']})" if s.get("culture") else ""
+                parts.append(f"[Source {i}] {s['title']}{culture}")
                 if s.get("excerpt"):
-                    parts.append(f"  Excerpt: {s['excerpt']}")
-                parts.append(f"  Type: {s.get('source_type', 'unknown')}")
+                    parts.append(f"  Content: {s['excerpt'][:400]}")
+                parts.append(f"  Category: {s.get('source_type', 'unknown')}")
                 parts.append("")
 
         if contexts:
-            parts.append("== Contextual Statements ==")
+            parts.append("== Text Segments / Evidence ==")
             for i, c in enumerate(contexts):
-                parts.append(f"[Context {i}] {c['summary']}")
+                parts.append(f"[Text {i}] {c['summary']}")
                 parts.append("")
+
+        if not sources and not contexts:
+            parts.append("(No relevant evidence found in the database for this query.)")
 
         return "\n".join(parts)
 
@@ -358,7 +404,7 @@ class ChatAnswerBuilder:
             query=query,
             chapter_id=chapter_id,
             answer_mode=AnswerMode.UNSUPPORTED.value,
-            answer_summary="No evidence is available to answer this question. Try selecting a chapter first, or rephrase your question.",
+            answer_summary="No relevant evidence was found for this query. Try rephrasing with specific names, places, cultures, or time periods.",
             confidence=0.0,
         )
         session.add(packet)
