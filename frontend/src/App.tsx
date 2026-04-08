@@ -1,13 +1,13 @@
 import { Routes, Route } from 'react-router-dom'
-import { ChapterProvider } from './context/ChapterContext'
+import { WorldProvider } from './context/WorldContext'
 import ThreePanelLayout from './layouts/ThreePanelLayout'
 
 export default function App() {
   return (
-    <ChapterProvider>
+    <WorldProvider>
       <Routes>
         <Route path="/*" element={<ThreePanelLayout />} />
       </Routes>
-    </ChapterProvider>
+    </WorldProvider>
   )
 }

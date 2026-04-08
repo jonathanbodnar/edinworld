@@ -1,20 +1,11 @@
 import { useState } from 'react'
-import { useChapterContext } from '../../context/ChapterContext'
-import EvidenceTab from './EvidenceTab'
-import ContextTab from './ContextTab'
-import ChatTab from './ChatTab'
-
-type Tab = 'evidence' | 'context' | 'chat'
+import { useWorldContext } from '../../context/WorldContext'
+import EvidenceSection from './EvidenceSection'
+import ChatSection from './ChatSection'
 
 export default function RightPanel() {
-  const [activeTab, setActiveTab] = useState<Tab>('evidence')
-  const { activeChapterId } = useChapterContext()
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'evidence', label: 'Evidence' },
-    { id: 'context', label: 'Context' },
-    { id: 'chat', label: 'Chat' },
-  ]
+  const [chatExpanded, setChatExpanded] = useState(false)
+  const { activeEpochId } = useWorldContext()
 
   return (
     <div style={{
@@ -26,50 +17,51 @@ export default function RightPanel() {
       overflow: 'hidden',
     }}>
       <div style={{
-        display: 'flex',
+        padding: '12px 14px 8px',
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
       }}>
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              flex: 1,
-              padding: '12px 8px',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
-              transition: 'all 0.15s',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+        <div style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          color: 'var(--text-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        }}>
+          Sources & Evidence
+        </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: activeTab === 'chat' ? 'hidden' : 'auto' }}>
-        {activeTab === 'chat' ? (
-          <ChatTab />
-        ) : !activeChapterId ? (
+      <div style={{
+        flex: chatExpanded ? 0 : 1,
+        overflowY: 'auto',
+        transition: 'flex 0.2s',
+        minHeight: chatExpanded ? '0' : '120px',
+      }}>
+        {!activeEpochId ? (
           <div style={{
-            padding: '40px 20px',
+            padding: '32px 16px',
             textAlign: 'center',
             color: 'var(--text-muted)',
-            fontSize: '13px',
+            fontSize: '12px',
           }}>
-            Select a chapter to view evidence and context.
+            Select an epoch to view sources and evidence used to construct this view of history.
           </div>
         ) : (
-          <>
-            {activeTab === 'evidence' && <EvidenceTab />}
-            {activeTab === 'context' && <ContextTab />}
-          </>
+          <EvidenceSection />
         )}
+      </div>
+
+      <div style={{
+        flexShrink: 0,
+        flex: chatExpanded ? 1 : 0,
+        minHeight: chatExpanded ? '200px' : '48px',
+        borderTop: '1px solid var(--border)',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'all 0.2s',
+      }}>
+        <ChatSection expanded={chatExpanded} onToggle={() => setChatExpanded(prev => !prev)} />
       </div>
     </div>
   )

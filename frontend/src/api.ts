@@ -1,5 +1,22 @@
 const BASE = '/world-api'
 
+const cache = new Map<string, { data: unknown; ts: number }>()
+const CACHE_TTL = 120_000
+
+function getCached<T>(key: string): T | null {
+  const entry = cache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.ts > CACHE_TTL) {
+    cache.delete(key)
+    return null
+  }
+  return entry.data as T
+}
+
+function setCache(key: string, data: unknown) {
+  cache.set(key, { data, ts: Date.now() })
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -9,6 +26,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(`API error ${res.status}: ${await res.text()}`)
   }
   return res.json()
+}
+
+async function cachedGet<T>(path: string): Promise<T> {
+  const hit = getCached<T>(path)
+  if (hit) return hit
+  const data = await request<T>(path)
+  setCache(path, data)
+  return data
 }
 
 export interface Epoch {
@@ -65,10 +90,40 @@ export interface Place {
   summary: string | null
 }
 
+export interface CultureSummary {
+  name: string
+  source_count: number
+  actor_count: number
+  event_count: number
+  place_count: number
+  image_count: number
+  explorable: boolean
+}
+
+export interface EpochOverview {
+  epoch: Epoch
+  cultures: CultureSummary[]
+  total_sources: number
+  total_actors: number
+  total_events: number
+  total_places: number
+  total_images: number
+  chapters: Chapter[]
+}
+
+export interface CultureDetail {
+  culture: string
+  actors: Actor[]
+  events: CanonEvent[]
+  places: Place[]
+  sources: SourceSet[]
+  images: ImageSet[]
+}
+
 export interface SourceSet {
   id: string
-  chapter_id: string
-  source_record_id: string
+  chapter_id?: string
+  source_record_id?: string
   title: string | null
   excerpt: string | null
   relevance_weight: number
@@ -98,11 +153,11 @@ export interface ArtifactSet {
 
 export interface ImageSet {
   id: string
-  chapter_id: string
+  chapter_id?: string
   image_url: string | null
   caption: string | null
   image_type: string | null
-  display_order: number
+  display_order?: number
 }
 
 export interface NarrationPacket {
@@ -157,15 +212,18 @@ export interface ChatMessage {
 }
 
 export const api = {
-  getEpochs: () => request<Epoch[]>('/epochs'),
+  getEpochs: () => cachedGet<Epoch[]>('/epochs/'),
+  getEpochOverview: (epochId: string) => cachedGet<EpochOverview>(`/epochs/${epochId}/overview`),
+  getCultureDetail: (epochId: string, culture: string) =>
+    cachedGet<CultureDetail>(`/epochs/${epochId}/culture/${encodeURIComponent(culture)}`),
   getChapters: (epochId?: string) =>
-    request<Chapter[]>(epochId ? `/chapters?epoch_id=${epochId}` : '/chapters'),
-  getChapterDetail: (id: string) => request<ChapterDetail>(`/chapters/${id}`),
-  getChapterSources: (id: string) => request<SourceSet[]>(`/chapters/${id}/sources`),
-  getChapterContext: (id: string) => request<ContextSet[]>(`/chapters/${id}/context`),
-  getChapterArtifacts: (id: string) => request<ArtifactSet[]>(`/chapters/${id}/artifacts`),
-  getChapterImages: (id: string) => request<ImageSet[]>(`/chapters/${id}/images`),
-  getNarration: (chapterId: string) => request<NarrationPacket[]>(`/narration-packets/${chapterId}`),
+    cachedGet<Chapter[]>(epochId ? `/chapters/?epoch_id=${epochId}` : '/chapters/'),
+  getChapterDetail: (id: string) => cachedGet<ChapterDetail>(`/chapters/${id}`),
+  getChapterSources: (id: string) => cachedGet<SourceSet[]>(`/chapters/${id}/sources`),
+  getChapterContext: (id: string) => cachedGet<ContextSet[]>(`/chapters/${id}/context`),
+  getChapterArtifacts: (id: string) => cachedGet<ArtifactSet[]>(`/chapters/${id}/artifacts`),
+  getChapterImages: (id: string) => cachedGet<ImageSet[]>(`/chapters/${id}/images`),
+  getNarration: (chapterId: string) => cachedGet<NarrationPacket[]>(`/narration-packets/${chapterId}`),
   chatQuery: (query: string, chapterId?: string, sessionId?: string) =>
     request<ChatQueryResult>('/chat/query', {
       method: 'POST',
@@ -175,8 +233,4 @@ export const api = {
         session_id: sessionId || null,
       }),
     }),
-  getChatSessions: (chapterId?: string) =>
-    request<ChatSession[]>(chapterId ? `/chat/sessions?chapter_id=${chapterId}` : '/chat/sessions'),
-  getChatSession: (id: string) =>
-    request<ChatSession & { messages: ChatMessage[] }>(`/chat/sessions/${id}`),
 }

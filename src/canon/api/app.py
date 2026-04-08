@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.canon.api.routes import (
     actors, admin, changes, chapters, chat, epochs, events, motifs,
@@ -7,12 +8,25 @@ from src.canon.api.routes import (
 )
 from src.canon.config import settings
 
+CACHE_PREFIXES = ("/epochs", "/chapters", "/actors", "/events", "/places", "/timeline", "/scores", "/narration-packets", "/world-packets")
+
+
+class CacheHeaderMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        if request.method == "GET" and any(request.url.path.startswith(p) for p in CACHE_PREFIXES):
+            response.headers["Cache-Control"] = "public, max-age=120, stale-while-revalidate=300"
+        return response
+
+
 app = FastAPI(
     title="Edinworld Canon API",
     description="Canon & Living World-State Engine",
     version="0.2.0",
     root_path="/world-api",
 )
+
+app.add_middleware(CacheHeaderMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

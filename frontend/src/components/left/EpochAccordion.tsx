@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Epoch } from '../../api'
+import { useWorldContext } from '../../context/WorldContext'
 import ChapterList from './ChapterList'
 
 function formatYear(y: number | null): string {
@@ -9,36 +10,48 @@ function formatYear(y: number | null): string {
 }
 
 export default function EpochAccordion({ epoch }: { epoch: Epoch }) {
-  const [open, setOpen] = useState(false)
+  const [chaptersOpen, setChaptersOpen] = useState(false)
+  const { activeEpochId, selectEpoch } = useWorldContext()
+  const isActive = activeEpochId === epoch.id
+
+  const handleClick = () => {
+    selectEpoch(epoch.id)
+    setChaptersOpen(prev => isActive ? !prev : true)
+  }
 
   return (
-    <div style={{ borderBottom: '1px solid var(--border)' }}>
+    <div style={{
+      borderBottom: '1px solid var(--border)',
+    }}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={handleClick}
         style={{
           width: '100%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '12px 16px',
+          padding: '10px 14px',
           border: 'none',
-          background: open ? 'var(--bg-tertiary)' : 'transparent',
+          background: isActive
+            ? 'linear-gradient(90deg, rgba(99,102,241,0.12), transparent)'
+            : 'transparent',
           cursor: 'pointer',
           transition: 'background 0.15s',
           textAlign: 'left',
+          borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
         }}
         onMouseEnter={e => {
-          if (!open) (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'
+          if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'
         }}
         onMouseLeave={e => {
-          if (!open) (e.currentTarget as HTMLElement).style.background = 'transparent'
+          if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: '13px',
-            fontWeight: 600,
-            color: 'var(--text-primary)',
+            fontSize: '12px',
+            fontWeight: isActive ? 700 : 500,
+            color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -46,26 +59,32 @@ export default function EpochAccordion({ epoch }: { epoch: Epoch }) {
             {epoch.title}
           </div>
           <div style={{
-            fontSize: '11px',
+            fontSize: '10px',
             color: 'var(--text-muted)',
-            marginTop: '2px',
+            marginTop: '1px',
           }}>
             {formatYear(epoch.time_start)} — {formatYear(epoch.time_end)}
-            {epoch.chapter_count > 0 && ` · ${epoch.chapter_count} ch.`}
+            {epoch.chapter_count > 0 && (
+              <span style={{ marginLeft: '6px', color: 'var(--accent)', fontWeight: 500 }}>
+                {epoch.chapter_count} ch.
+              </span>
+            )}
           </div>
         </div>
         <span style={{
           color: 'var(--text-muted)',
-          fontSize: '12px',
-          marginLeft: '8px',
+          fontSize: '10px',
+          marginLeft: '6px',
           transition: 'transform 0.15s',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transform: chaptersOpen && isActive ? 'rotate(90deg)' : 'rotate(0deg)',
         }}>
-          ▶
+          {epoch.chapter_count > 0 ? '▶' : ''}
         </span>
       </button>
 
-      {open && <ChapterList epochId={epoch.id} />}
+      {chaptersOpen && isActive && epoch.chapter_count > 0 && (
+        <ChapterList epochId={epoch.id} />
+      )}
     </div>
   )
 }

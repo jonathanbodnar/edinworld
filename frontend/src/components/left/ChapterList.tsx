@@ -16,7 +16,7 @@ export default function ChapterList({ epochId }: { epochId: string }) {
 
   if (loading) {
     return (
-      <div style={{ padding: '8px 16px 12px 24px', color: 'var(--text-muted)', fontSize: '12px' }}>
+      <div style={{ padding: '6px 14px 8px 24px', color: 'var(--text-muted)', fontSize: '11px' }}>
         Loading...
       </div>
     )
@@ -24,14 +24,14 @@ export default function ChapterList({ epochId }: { epochId: string }) {
 
   if (chapters.length === 0) {
     return (
-      <div style={{ padding: '8px 16px 12px 24px', color: 'var(--text-muted)', fontSize: '12px' }}>
+      <div style={{ padding: '6px 14px 8px 24px', color: 'var(--text-muted)', fontSize: '11px' }}>
         No chapters
       </div>
     )
   }
 
   return (
-    <div style={{ paddingBottom: '4px' }}>
+    <div style={{ paddingBottom: '2px' }}>
       {chapters.map(chapter => (
         <ChapterItem key={chapter.id} chapter={chapter} />
       ))}

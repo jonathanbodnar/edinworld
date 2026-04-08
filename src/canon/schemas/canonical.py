@@ -307,6 +307,27 @@ class EpochWithCountResponse(EpochResponse):
     chapter_count: int = 0
 
 
+class CultureSummary(BaseModel):
+    name: str
+    source_count: int = 0
+    actor_count: int = 0
+    event_count: int = 0
+    place_count: int = 0
+    image_count: int = 0
+    explorable: bool = False
+
+
+class EpochOverviewResponse(BaseModel):
+    epoch: EpochWithCountResponse
+    cultures: list[CultureSummary] = []
+    total_sources: int = 0
+    total_actors: int = 0
+    total_events: int = 0
+    total_places: int = 0
+    total_images: int = 0
+    chapters: list[ChapterResponse] = []
+
+
 class ChatQueryRequest(BaseModel):
     query: str
     chapter_id: uuid.UUID | None = None

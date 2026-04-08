@@ -1,1 +1,1 @@
-export { useChapterContext } from '../context/ChapterContext'
+export { useWorldContext } from '../context/WorldContext'

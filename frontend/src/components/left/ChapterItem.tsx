@@ -1,36 +1,36 @@
 import type { Chapter } from '../../api'
-import { useChapterContext } from '../../context/ChapterContext'
+import { useWorldContext } from '../../context/WorldContext'
 
 export default function ChapterItem({ chapter }: { chapter: Chapter }) {
-  const { activeChapterId, selectChapter, loading } = useChapterContext()
+  const { activeChapterId, selectChapter, chapterLoading } = useWorldContext()
   const isActive = activeChapterId === chapter.id
 
   return (
     <button
-      onClick={() => !loading && selectChapter(chapter.id)}
-      disabled={loading}
+      onClick={() => !chapterLoading && selectChapter(chapter.id)}
+      disabled={chapterLoading}
       style={{
         width: '100%',
         display: 'block',
-        padding: '8px 16px 8px 28px',
+        padding: '6px 14px 6px 26px',
         border: 'none',
-        background: isActive ? 'var(--accent)' : 'transparent',
-        cursor: loading ? 'wait' : 'pointer',
+        background: isActive ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+        cursor: chapterLoading ? 'wait' : 'pointer',
         textAlign: 'left',
         transition: 'background 0.15s',
-        borderLeft: isActive ? '3px solid var(--accent-hover)' : '3px solid transparent',
+        borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
       }}
       onMouseEnter={e => {
         if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--bg-hover)'
       }}
       onMouseLeave={e => {
-        if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
+        if (!isActive) (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(99, 102, 241, 0.2)' : 'transparent'
       }}
     >
       <div style={{
-        fontSize: '12px',
+        fontSize: '11px',
         fontWeight: isActive ? 600 : 400,
-        color: isActive ? '#fff' : 'var(--text-primary)',
+        color: isActive ? 'var(--accent-hover)' : 'var(--text-secondary)',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -39,14 +39,14 @@ export default function ChapterItem({ chapter }: { chapter: Chapter }) {
       </div>
       {chapter.chapter_summary && (
         <div style={{
-          fontSize: '11px',
-          color: isActive ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)',
-          marginTop: '2px',
+          fontSize: '10px',
+          color: 'var(--text-muted)',
+          marginTop: '1px',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}>
-          {chapter.chapter_summary.slice(0, 80)}
+          {chapter.chapter_summary.slice(0, 60)}
         </div>
       )}
     </button>
