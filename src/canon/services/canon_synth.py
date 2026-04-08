@@ -147,15 +147,19 @@ class CanonSynthService:
 
             for h in group:
                 h.merged_into_id = actor.id
+                archive_id = h.source_segment_id or h.source_statement_id or h.source_record_id
+                if archive_id is None:
+                    continue
                 link = CanonSupportLink(
                     id=uuid.uuid4(),
                     canonical_type=CanonicalType.ACTOR,
                     canonical_id=actor.id,
                     archive_object_type=(
                         ArchiveObjectType.SEGMENT if h.source_segment_id
-                        else ArchiveObjectType.CONTEXTUAL_STATEMENT
+                        else ArchiveObjectType.CONTEXTUAL_STATEMENT if h.source_statement_id
+                        else ArchiveObjectType.SOURCE_RECORD
                     ),
-                    archive_object_id=h.source_segment_id or h.source_statement_id,
+                    archive_object_id=archive_id,
                     support_type=SupportType.PRIMARY_EVIDENCE,
                     weight=h.confidence,
                 )
@@ -193,15 +197,19 @@ class CanonSynthService:
 
             for h in group:
                 h.merged_into_id = event.id
+                archive_id = h.source_segment_id or h.source_statement_id or h.source_record_id
+                if archive_id is None:
+                    continue
                 link = CanonSupportLink(
                     id=uuid.uuid4(),
                     canonical_type=CanonicalType.EVENT,
                     canonical_id=event.id,
                     archive_object_type=(
                         ArchiveObjectType.SEGMENT if h.source_segment_id
-                        else ArchiveObjectType.CONTEXTUAL_STATEMENT
+                        else ArchiveObjectType.CONTEXTUAL_STATEMENT if h.source_statement_id
+                        else ArchiveObjectType.SOURCE_RECORD
                     ),
-                    archive_object_id=h.source_segment_id or h.source_statement_id,
+                    archive_object_id=archive_id,
                     support_type=SupportType.PRIMARY_EVIDENCE,
                     weight=h.confidence,
                 )
@@ -239,15 +247,19 @@ class CanonSynthService:
 
             for h in group:
                 h.merged_into_id = place.id
+                archive_id = h.source_segment_id or h.source_statement_id or h.source_record_id
+                if archive_id is None:
+                    continue
                 link = CanonSupportLink(
                     id=uuid.uuid4(),
                     canonical_type=CanonicalType.PLACE,
                     canonical_id=place.id,
                     archive_object_type=(
                         ArchiveObjectType.SEGMENT if h.source_segment_id
-                        else ArchiveObjectType.CONTEXTUAL_STATEMENT
+                        else ArchiveObjectType.CONTEXTUAL_STATEMENT if h.source_statement_id
+                        else ArchiveObjectType.SOURCE_RECORD
                     ),
-                    archive_object_id=h.source_segment_id or h.source_statement_id,
+                    archive_object_id=archive_id,
                     support_type=SupportType.PRIMARY_EVIDENCE,
                     weight=h.confidence,
                 )
