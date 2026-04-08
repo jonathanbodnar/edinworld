@@ -26,6 +26,7 @@ services:
         condition: service_completed_successfully
     networks:
       - eden_default
+      - deploy_default
     ports:
       - "127.0.0.1:8001:8001"
     environment:
@@ -75,4 +76,6 @@ services:
 
 networks:
   eden_default:
+    external: true
+  deploy_default:
     external: true
