@@ -192,10 +192,17 @@ class ChapterBuilderService:
         logger.info("Built %d chapters across %d epochs", len(chapters), len(epochs))
         return chapters
 
-    async def run_full_build(self, session: AsyncSession) -> dict:
+    async def run_ensure_epochs_only(self, session: AsyncSession) -> dict:
+        """Create the default epoch set without building chapters. Fast, no AI."""
         epochs = await self.ensure_epochs(session)
+        return {"epochs": len(epochs), "chapters": 0}
+
+    async def run_full_build(self, session: AsyncSession) -> dict:
+        """Build chapters for all epochs (ensure_epochs is called inside build_chapters)."""
         chapters = await self.build_chapters(session)
+        epoch_q = select(CanonicalEpoch).where(CanonicalEpoch.is_current.is_(True))
+        epoch_count = len((await session.execute(epoch_q)).scalars().all())
         return {
-            "epochs": len(epochs),
+            "epochs": epoch_count,
             "chapters": len(chapters),
         }

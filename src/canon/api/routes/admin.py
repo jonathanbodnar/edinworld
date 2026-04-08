@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,10 +30,21 @@ from src.canon.services.motif_service import MotifService
 from src.canon.services.narration_builder import NarrationBuilderService
 from src.canon.services.scoring_service import ScoringService
 from src.canon.services.evidence_bundle_builder import EvidenceBundleBuilder
+from src.canon.services.source_record_synth import SourceRecordSynthService
 from src.canon.services.world_packet_builder import WorldPacketBuilderService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.post("/ensure-epochs", response_model=dict)
+async def ensure_epochs(session: AsyncSession = Depends(get_session)):
+    """Create the default epoch set if not present. Fast, no AI required.
+    This is the first step to fix 'No epochs found' in the UI."""
+    svc = ChapterBuilderService()
+    result = await svc.run_ensure_epochs_only(session)
+    await session.commit()
+    return result
 
 
 @router.post("/run-synthesis", response_model=SynthesisResponse)
@@ -41,19 +52,23 @@ async def run_synthesis(
     request: SynthesisRequest = SynthesisRequest(),
     session: AsyncSession = Depends(get_session),
 ):
-    """Trigger the full canon synthesis pipeline (all phases)."""
+    """Trigger selected canon synthesis phases. All phases default to False — explicitly
+    set each flag you want to run. This prevents accidental full-pipeline triggering."""
     result = SynthesisResponse()
 
+    # Phase 1: Extract hints from segments/statements (bounded batch)
     if request.run_extraction:
         svc = KnowledgePrepService()
         result.extraction = await svc.run_full_extraction(session)
         await session.commit()
 
+    # Phase 2: Synthesize canonical entities from hints
     if request.run_synthesis:
         svc = CanonSynthService()
         result.synthesis = await svc.run_full_synthesis(session)
         await session.commit()
 
+    # Phase 3: Build/refresh epochs and chapters
     if request.run_chapters:
         svc = ChapterBuilderService()
         result.chapters = await svc.run_full_build(session)
@@ -102,21 +117,42 @@ async def run_synthesis(
     return result
 
 
+@router.post("/run-source-extraction", response_model=dict)
+async def run_source_extraction(
+    batch_size: int = 30,
+    max_records: int = 300,
+    after_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Extract canonical hints from source record metadata (title, culture, dates).
+    More efficient than segment-level extraction — one AI call per batch of records.
+    Call repeatedly with the returned next_record_id to process all records."""
+    import uuid as _uuid
+    svc = SourceRecordSynthService()
+    after_uuid = _uuid.UUID(after_id) if after_id else None
+    result = await svc.run_extraction_batch(
+        session,
+        batch_size=batch_size,
+        max_records=max_records,
+        after_id=after_uuid,
+    )
+    await session.commit()
+    return result
+
+
 @router.post("/run-full-pipeline", response_model=SynthesisResponse)
 async def run_full_pipeline(session: AsyncSession = Depends(get_session)):
-    """Run every phase of the pipeline in sequence."""
+    """Run extraction → synthesis → chapters in sequence.
+    Extraction is bounded (500 segments max per call). Call repeatedly for full coverage."""
     return await run_synthesis(
         SynthesisRequest(
             run_extraction=True,
             run_synthesis=True,
             run_chapters=True,
-            run_motifs=True,
-            run_scoring=True,
-            run_narration=True,
-            run_world_packets=True,
-            run_change_detection=True,
-            run_impact_resolution=True,
-            run_canon_updates=True,
+            run_motifs=False,
+            run_scoring=False,
+            run_narration=False,
+            run_world_packets=False,
         ),
         session,
     )
@@ -135,28 +171,42 @@ async def run_alias_merges(session: AsyncSession = Depends(get_session)):
 async def get_stats(session: AsyncSession = Depends(get_session)):
     """Get comprehensive system B stats."""
     hints_count = (await session.execute(select(func.count(ExtractedHint.id)))).scalar() or 0
-    epochs_count = (await session.execute(
-        select(func.count(CanonicalEpoch.id)).where(CanonicalEpoch.is_current.is_(True))
-    )).scalar() or 0
-    chapters_count = (await session.execute(
-        select(func.count(CanonicalChapter.id)).where(CanonicalChapter.is_current.is_(True))
-    )).scalar() or 0
-    actors_count = (await session.execute(
-        select(func.count(CanonicalActor.id)).where(CanonicalActor.is_current.is_(True))
-    )).scalar() or 0
-    events_count = (await session.execute(
-        select(func.count(CanonicalEvent.id)).where(CanonicalEvent.is_current.is_(True))
-    )).scalar() or 0
-    places_count = (await session.execute(
-        select(func.count(CanonicalPlace.id)).where(CanonicalPlace.is_current.is_(True))
-    )).scalar() or 0
+    epochs_count = (
+        await session.execute(
+            select(func.count(CanonicalEpoch.id)).where(CanonicalEpoch.is_current.is_(True))
+        )
+    ).scalar() or 0
+    chapters_count = (
+        await session.execute(
+            select(func.count(CanonicalChapter.id)).where(CanonicalChapter.is_current.is_(True))
+        )
+    ).scalar() or 0
+    actors_count = (
+        await session.execute(
+            select(func.count(CanonicalActor.id)).where(CanonicalActor.is_current.is_(True))
+        )
+    ).scalar() or 0
+    events_count = (
+        await session.execute(
+            select(func.count(CanonicalEvent.id)).where(CanonicalEvent.is_current.is_(True))
+        )
+    ).scalar() or 0
+    places_count = (
+        await session.execute(
+            select(func.count(CanonicalPlace.id)).where(CanonicalPlace.is_current.is_(True))
+        )
+    ).scalar() or 0
     motifs_count = (await session.execute(select(func.count(Motif.id)))).scalar() or 0
-    motif_assignments_count = (await session.execute(select(func.count(MotifAssignment.id)))).scalar() or 0
+    motif_assignments_count = (
+        await session.execute(select(func.count(MotifAssignment.id)))
+    ).scalar() or 0
     scores_count = (await session.execute(select(func.count(CanonScore.id)))).scalar() or 0
     narration_count = (await session.execute(select(func.count(NarrationPacket.id)))).scalar() or 0
     world_packets_count = (await session.execute(select(func.count(WorldPacket.id)))).scalar() or 0
     change_events_count = (await session.execute(select(func.count(ChangeEvent.id)))).scalar() or 0
-    update_targets_count = (await session.execute(select(func.count(CanonUpdateTarget.id)))).scalar() or 0
+    update_targets_count = (
+        await session.execute(select(func.count(CanonUpdateTarget.id)))
+    ).scalar() or 0
 
     return {
         "extracted_hints": hints_count,

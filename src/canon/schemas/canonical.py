@@ -363,9 +363,9 @@ class AnswerPacketResponse(BaseModel):
 
 
 class SynthesisRequest(BaseModel):
-    run_extraction: bool = True
-    run_synthesis: bool = True
-    run_chapters: bool = True
+    run_extraction: bool = False
+    run_synthesis: bool = False
+    run_chapters: bool = False
     run_motifs: bool = False
     run_scoring: bool = False
     run_narration: bool = False
