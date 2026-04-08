@@ -69,6 +69,7 @@ services:
         condition: service_started
     networks:
       - eden_default
+      - deploy_default
     deploy:
       resources:
         limits:
