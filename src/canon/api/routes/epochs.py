@@ -240,44 +240,41 @@ async def get_epoch_culture_detail(
 
     culture_filter = SASourceRecord.culture == culture_name if culture_name != "Unknown" else SASourceRecord.culture.is_(None)
 
-    src_q = (
-        select(SASourceRecord.id)
-        .where(culture_filter)
-    )
-    culture_sr_ids = [r[0] for r in (await session.execute(src_q)).all()]
-
-    if not culture_sr_ids:
-        return {"culture": culture_name, "actors": [], "events": [], "places": [], "sources": [], "images": []}
-
-    link_q = select(CanonSupportLink.canonical_id, CanonSupportLink.canonical_type).where(
-        CanonSupportLink.archive_object_id.in_(culture_sr_ids),
-    )
-    links = (await session.execute(link_q)).all()
-
-    entity_ids_by_type: dict[str, set] = defaultdict(set)
-    for canonical_id, canonical_type in links:
-        entity_ids_by_type[canonical_type.value].add(canonical_id)
-
-    deps_q = select(CanonDependency.child_id).where(
+    deps_q = select(CanonDependency).where(
         CanonDependency.parent_type == CanonicalType.CHAPTER,
         CanonDependency.parent_id.in_(chapter_ids),
     )
-    epoch_entity_ids = {r[0] for r in (await session.execute(deps_q)).all()}
+    deps = (await session.execute(deps_q)).scalars().all()
+
+    all_actor_ids = list({d.child_id for d in deps if d.child_type == CanonicalType.ACTOR})
+    all_event_ids = list({d.child_id for d in deps if d.child_type == CanonicalType.EVENT})
+    all_place_ids = list({d.child_id for d in deps if d.child_type == CanonicalType.PLACE})
+    all_entity_ids = all_actor_ids + all_event_ids + all_place_ids
+
+    culture_entity_ids: set = set()
+    if all_entity_ids:
+        link_q = select(CanonSupportLink.canonical_id).where(
+            CanonSupportLink.canonical_id.in_(all_entity_ids),
+            CanonSupportLink.archive_object_id.in_(
+                select(SASourceRecord.id).where(culture_filter)
+            ),
+        )
+        culture_entity_ids = {r[0] for r in (await session.execute(link_q)).all()}
 
     actors = []
-    actor_ids = list(entity_ids_by_type.get("actor", set()) & epoch_entity_ids)
+    actor_ids = [a for a in all_actor_ids if a in culture_entity_ids]
     if actor_ids:
         aq = select(CanonicalActor).where(CanonicalActor.id.in_(actor_ids), CanonicalActor.is_current.is_(True))
         actors = [ActorResponse.model_validate(a) for a in (await session.execute(aq)).scalars().all()]
 
     events = []
-    event_ids = list(entity_ids_by_type.get("event", set()) & epoch_entity_ids)
+    event_ids = [e for e in all_event_ids if e in culture_entity_ids]
     if event_ids:
         eq = select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids), CanonicalEvent.is_current.is_(True))
         events = [EventResponse.model_validate(e) for e in (await session.execute(eq)).scalars().all()]
 
     places = []
-    place_ids = list(entity_ids_by_type.get("place", set()) & epoch_entity_ids)
+    place_ids = [p for p in all_place_ids if p in culture_entity_ids]
     if place_ids:
         pq = select(CanonicalPlace).where(CanonicalPlace.id.in_(place_ids), CanonicalPlace.is_current.is_(True))
         places = [PlaceResponse.model_validate(p) for p in (await session.execute(pq)).scalars().all()]
@@ -286,7 +283,9 @@ async def get_epoch_culture_detail(
         select(ChapterSourceSet)
         .where(
             ChapterSourceSet.chapter_id.in_(chapter_ids),
-            ChapterSourceSet.source_record_id.in_(culture_sr_ids),
+            ChapterSourceSet.source_record_id.in_(
+                select(SASourceRecord.id).where(culture_filter)
+            ),
         )
         .order_by(ChapterSourceSet.relevance_weight.desc())
         .limit(50)

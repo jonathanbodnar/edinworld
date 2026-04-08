@@ -49,7 +49,6 @@ export default function ChatSection({ expanded, onToggle }: { expanded: boolean;
           type="text"
           value={input}
           onChange={e => setInput(e.target.value)}
-          onFocus={onToggle}
           placeholder="Ask about this period..."
           style={{
             flex: 1,

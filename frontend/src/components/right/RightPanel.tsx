@@ -33,10 +33,9 @@ export default function RightPanel() {
       </div>
 
       <div style={{
-        flex: chatExpanded ? 0 : 1,
+        flex: 1,
         overflowY: 'auto',
-        transition: 'flex 0.2s',
-        minHeight: chatExpanded ? '0' : '120px',
+        minHeight: 0,
       }}>
         {!activeEpochId ? (
           <div style={{
@@ -54,12 +53,12 @@ export default function RightPanel() {
 
       <div style={{
         flexShrink: 0,
-        flex: chatExpanded ? 1 : 0,
-        minHeight: chatExpanded ? '200px' : '48px',
         borderTop: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
-        transition: 'all 0.2s',
+        maxHeight: chatExpanded ? '50%' : '48px',
+        transition: 'max-height 0.2s',
+        overflow: 'hidden',
       }}>
         <ChatSection expanded={chatExpanded} onToggle={() => setChatExpanded(prev => !prev)} />
       </div>
