@@ -55,7 +55,7 @@ class NarrationBuilderService:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
     async def _gather_chapter_data(
@@ -143,7 +143,7 @@ class NarrationBuilderService:
             }
 
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=2048,
                 system=NARRATION_SYSTEM_PROMPT,

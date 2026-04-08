@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID
@@ -73,6 +74,7 @@ class SASegment(Base):
     original_text: Mapped[str | None] = mapped_column(Text)
     normalized_text: Mapped[str | None] = mapped_column(Text)
     review_status: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SAContextualStatement(Base):

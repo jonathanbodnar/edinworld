@@ -66,7 +66,7 @@ class WorldPacketBuilderService:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
     async def _gather_chapter_context(
@@ -155,7 +155,7 @@ class WorldPacketBuilderService:
             return self._generate_world_packet_rules_fallback(prompt)
 
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=4096,
                 system=WORLD_PACKET_SYSTEM_PROMPT,

@@ -93,7 +93,7 @@ class MotifService:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
     async def ensure_seed_motifs(self, session: AsyncSession) -> dict[str, uuid.UUID]:
@@ -130,7 +130,7 @@ class MotifService:
         prompt = MOTIF_CLASSIFICATION_PROMPT.format(motif_list=motif_list)
 
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=2048,
                 system=prompt,

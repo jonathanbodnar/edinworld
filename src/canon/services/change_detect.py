@@ -31,7 +31,7 @@ class ChangeDetectService:
         """Detect segments created after the last scan."""
         q = select(SASegment)
         if since:
-            q = q.where(SASegment.id.isnot(None))
+            q = q.where(SASegment.created_at >= since)
 
         segments = (await session.execute(q)).scalars().all()
 

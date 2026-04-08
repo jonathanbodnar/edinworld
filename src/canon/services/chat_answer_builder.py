@@ -113,7 +113,7 @@ class ChatAnswerBuilder:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
 
     async def answer_query(
@@ -379,7 +379,7 @@ class ChatAnswerBuilder:
 
         if settings.anthropic_api_key:
             try:
-                response = self.client.messages.create(
+                response = await self.client.messages.create(
                     model=settings.anthropic_model,
                     max_tokens=4096,
                     system=CHAT_SYSTEM_PROMPT,
