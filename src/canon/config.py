@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-20250514"
     extraction_batch_size: int = 10
 
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+
     ollama_base_url: str = ""
     ollama_model: str = "qwen3:14b"
 

@@ -1,6 +1,7 @@
 """ChatAnswerBuilder: receives a user query, retrieves relevant evidence using
-text search across System A data and chapter bundles, calls an LLM (Ollama or
-Anthropic) for a grounded answer, creates answer_packets with linked sources/context."""
+text search across System A data and chapter bundles, calls an LLM (DeepSeek,
+Ollama, or Anthropic) for a grounded answer, creates answer_packets with linked
+sources/context."""
 
 from __future__ import annotations
 
@@ -121,14 +122,18 @@ def _extract_keywords(query: str) -> list[str]:
 
 class ChatAnswerBuilder:
     def __init__(self):
-        self._client = None
+        self._anthropic_client = None
 
     @property
-    def client(self):
-        if self._client is None:
+    def anthropic_client(self):
+        if self._anthropic_client is None:
             import anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-        return self._client
+            self._anthropic_client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        return self._anthropic_client
+
+    @property
+    def _use_deepseek(self) -> bool:
+        return bool(settings.deepseek_api_key)
 
     @property
     def _use_ollama(self) -> bool:
@@ -383,62 +388,24 @@ class ChatAnswerBuilder:
 
         return "\n".join(parts)
 
-    def _trim_evidence_for_local(self, prompt: str) -> str:
-        """Reduce evidence size for local LLM -- keep top 5 sources, 5 contexts,
-        shorter excerpts to keep input tokens manageable."""
-        lines = prompt.split("\n")
-        trimmed = []
-        src_count = 0
-        ctx_count = 0
-        in_sources = False
-        in_contexts = False
-        skip_until_next = False
-
-        for line in lines:
-            if line.startswith("== Source Records =="):
-                in_sources = True
-                in_contexts = False
-                trimmed.append(line)
-                continue
-            if line.startswith("== Text Segments"):
-                in_sources = False
-                in_contexts = True
-                skip_until_next = False
-                trimmed.append(line)
-                continue
-
-            if in_sources and line.startswith("[Source "):
-                src_count += 1
-                skip_until_next = src_count > 5
-            if in_contexts and line.startswith("[Text "):
-                ctx_count += 1
-                skip_until_next = ctx_count > 5
-
-            if skip_until_next:
-                continue
-
-            if line.strip().startswith("Content:") and len(line) > 350:
-                trimmed.append(line[:350] + "...")
-            else:
-                trimmed.append(line)
-
-        return "\n".join(trimmed)
-
-    def _call_ollama_sync(self, prompt: str) -> dict:
-        """Call Ollama's OpenAI-compatible chat API (sync, runs in thread)."""
-        url = f"{settings.ollama_base_url.rstrip('/')}/v1/chat/completions"
-        trimmed_prompt = self._trim_evidence_for_local(prompt)
+    async def _call_deepseek(self, prompt: str) -> dict:
+        """Call DeepSeek API (OpenAI-compatible) for structured chat answers."""
+        url = f"{settings.deepseek_base_url.rstrip('/')}/chat/completions"
         payload = {
-            "model": settings.ollama_model,
+            "model": settings.deepseek_model,
             "messages": [
                 {"role": "system", "content": CHAT_SYSTEM_PROMPT_JSON},
-                {"role": "user", "content": trimmed_prompt},
+                {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
-            "max_tokens": 1024,
+            "max_tokens": 2048,
         }
-        with httpx.Client(timeout=300.0) as client:
-            resp = client.post(url, json=payload)
+        headers = {
+            "Authorization": f"Bearer {settings.deepseek_api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
 
@@ -447,17 +414,12 @@ class ChatAnswerBuilder:
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
-        raise ValueError(f"No JSON found in Ollama response: {raw[:200]}")
-
-    async def _call_ollama(self, prompt: str) -> dict:
-        """Async wrapper: runs sync Ollama call in a thread to avoid Docker+anyio issues."""
-        import asyncio
-        return await asyncio.to_thread(self._call_ollama_sync, prompt)
+        raise ValueError(f"No JSON found in DeepSeek response: {raw[:300]}")
 
     async def _call_anthropic(self, prompt: str) -> dict:
-        """Call Anthropic Claude with tool_use for structured answers."""
+        """Call Anthropic Claude with tool_use for structured answers (fallback)."""
         try:
-            response = await self.client.messages.create(
+            response = await self.anthropic_client.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=4096,
                 system=CHAT_SYSTEM_PROMPT,
@@ -486,37 +448,31 @@ class ChatAnswerBuilder:
     ) -> AnswerPacket:
         prompt = self._build_evidence_prompt(query, sources, contexts)
 
-        answer_data = {"answer": "", "confidence": 0.0, "answer_mode": "unsupported"}
+        answer_data = None
 
-        if self._use_ollama:
+        # Priority: DeepSeek > Anthropic > error
+        if self._use_deepseek:
             try:
-                answer_data = await self._call_ollama(prompt)
-                logger.info("Ollama answered query: %s", query[:80])
+                answer_data = await self._call_deepseek(prompt)
+                logger.info("DeepSeek answered query: %s", query[:80])
             except Exception:
-                logger.exception("Ollama chat answer failed, falling back to Anthropic")
+                logger.exception("DeepSeek chat failed, trying fallback")
                 answer_data = None
 
-            if answer_data is not None:
-                pass  # use ollama result
-            elif settings.anthropic_api_key:
+        if answer_data is None and settings.anthropic_api_key:
+            try:
                 answer_data = await self._call_anthropic(prompt)
-            else:
-                answer_data = {
-                    "answer": "I encountered an error processing your question. Please try again.",
-                    "confidence": 0.0,
-                    "answer_mode": "unsupported",
-                }
-        elif settings.anthropic_api_key:
-            answer_data = await self._call_anthropic(prompt)
-        else:
+                logger.info("Anthropic fallback answered query: %s", query[:80])
+            except Exception:
+                logger.exception("Anthropic fallback also failed")
+                answer_data = None
+
+        if answer_data is None:
             answer_data = {
-                "answer": "AI answering is not configured. Evidence has been retrieved for manual review.",
+                "answer": "I encountered an error processing your question. Please try again.",
                 "confidence": 0.0,
                 "answer_mode": "unsupported",
             }
-
-        if answer_data is None:
-            answer_data = {"answer": "", "confidence": 0.0, "answer_mode": "unsupported"}
 
         packet = AnswerPacket(
             id=uuid.uuid4(),
