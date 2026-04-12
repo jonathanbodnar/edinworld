@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useWorldContext } from '../../context/WorldContext'
 import type { Actor, CanonEvent, Place } from '../../api'
+import EntityDetailModal from './EntityDetailModal'
 
 function formatYear(y: number | null): string {
   if (y === null) return '?'
@@ -7,17 +9,18 @@ function formatYear(y: number | null): string {
   return `${y} CE`
 }
 
-function EntityCard({ name, type, summary, timeStart, timeEnd, color }: {
-  name: string; type: string; summary: string | null; timeStart: number | null; timeEnd: number | null; color: string
+function EntityCard({ name, type, summary, timeStart, timeEnd, color, onClick }: {
+  name: string; type: string; summary: string | null; timeStart: number | null; timeEnd: number | null; color: string; onClick?: () => void
 }) {
   return (
-    <div style={{
+    <div onClick={onClick} style={{
       background: 'var(--bg-tertiary)',
       border: '1px solid var(--border)',
       borderRadius: '8px',
       padding: '12px',
       borderLeft: `3px solid ${color}`,
       transition: 'border-color 0.2s',
+      cursor: onClick ? 'pointer' : 'default',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -64,7 +67,8 @@ function EntityCard({ name, type, summary, timeStart, timeEnd, color }: {
 }
 
 export default function CultureView() {
-  const { activeCulture, cultureDetail, cultureLoading, epochOverview, selectCulture } = useWorldContext()
+  const { activeCulture, cultureDetail, cultureLoading, epochOverview, selectCulture, selectChapter } = useWorldContext()
+  const [modalEntity, setModalEntity] = useState<{ type: 'actor' | 'event' | 'place'; id: string } | null>(null)
 
   if (cultureLoading) {
     return (
@@ -143,7 +147,7 @@ export default function CultureView() {
           <Section title="Actors & Figures" count={actors.length}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '8px' }}>
               {actors.map((a: Actor) => (
-                <EntityCard key={a.id} name={a.canonical_name} type={a.actor_type} summary={a.summary} timeStart={a.time_start} timeEnd={a.time_end} color="var(--accent)" />
+                <EntityCard key={a.id} name={a.canonical_name} type={a.actor_type} summary={a.summary} timeStart={a.time_start} timeEnd={a.time_end} color="var(--accent)" onClick={() => setModalEntity({ type: 'actor', id: a.id })} />
               ))}
             </div>
           </Section>
@@ -153,7 +157,7 @@ export default function CultureView() {
           <Section title="Events" count={events.length}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '8px' }}>
               {events.map((e: CanonEvent) => (
-                <EntityCard key={e.id} name={e.canonical_name} type={e.event_type} summary={e.summary} timeStart={e.time_start} timeEnd={e.time_end} color="var(--warning)" />
+                <EntityCard key={e.id} name={e.canonical_name} type={e.event_type} summary={e.summary} timeStart={e.time_start} timeEnd={e.time_end} color="var(--warning)" onClick={() => setModalEntity({ type: 'event', id: e.id })} />
               ))}
             </div>
           </Section>
@@ -163,7 +167,7 @@ export default function CultureView() {
           <Section title="Places" count={places.length}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '8px' }}>
               {places.map((p: Place) => (
-                <EntityCard key={p.id} name={p.canonical_name} type={p.place_type} summary={p.summary} timeStart={null} timeEnd={null} color="var(--success)" />
+                <EntityCard key={p.id} name={p.canonical_name} type={p.place_type} summary={p.summary} timeStart={null} timeEnd={null} color="var(--success)" onClick={() => setModalEntity({ type: 'place', id: p.id })} />
               ))}
             </div>
           </Section>
@@ -261,6 +265,18 @@ export default function CultureView() {
           </div>
         )}
       </div>
+
+      {modalEntity && (
+        <EntityDetailModal
+          entityType={modalEntity.type}
+          entityId={modalEntity.id}
+          onClose={() => setModalEntity(null)}
+          onChapterClick={(chapterId) => {
+            setModalEntity(null)
+            selectChapter(chapterId)
+          }}
+        />
+      )}
     </div>
   )
 }

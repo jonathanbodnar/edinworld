@@ -10,6 +10,8 @@ from src.canon.database import get_session
 from src.canon.models.canonical_event import CanonicalEvent
 from src.canon.models.canon_support_link import CanonSupportLink
 from src.canon.models.enums import CanonicalType
+from src.canon.api.routes.entity_images import get_entity_images
+from src.canon.api.routes.actors import _get_linked_chapters, _get_source_excerpts
 from src.canon.schemas.canonical import EventResponse, SupportLinkResponse
 
 router = APIRouter()
@@ -38,12 +40,16 @@ async def list_events(
     return [EventResponse.model_validate(e) for e in result.scalars().all()]
 
 
-@router.get("/{event_id}", response_model=EventResponse)
+@router.get("/{event_id}", response_model=dict)
 async def get_event(event_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     event = await session.get(CanonicalEvent, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    return EventResponse.model_validate(event)
+    resp = EventResponse.model_validate(event).model_dump(mode="json")
+    resp["images"] = (await get_entity_images(session, [event_id], limit=200)).get(event_id, [])
+    resp["chapters"] = await _get_linked_chapters(session, event_id, "event")
+    resp["source_excerpts"] = await _get_source_excerpts(session, event_id, CanonicalType.EVENT)
+    return resp
 
 
 @router.get("/{event_id}/support-links", response_model=list[SupportLinkResponse])

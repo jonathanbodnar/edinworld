@@ -10,6 +10,8 @@ from src.canon.database import get_session
 from src.canon.models.canonical_place import CanonicalPlace
 from src.canon.models.canon_support_link import CanonSupportLink
 from src.canon.models.enums import CanonicalType
+from src.canon.api.routes.entity_images import get_entity_images
+from src.canon.api.routes.actors import _get_linked_chapters, _get_source_excerpts
 from src.canon.schemas.canonical import PlaceResponse, SupportLinkResponse
 
 router = APIRouter()
@@ -38,12 +40,16 @@ async def list_places(
     return [PlaceResponse.model_validate(p) for p in result.scalars().all()]
 
 
-@router.get("/{place_id}", response_model=PlaceResponse)
+@router.get("/{place_id}", response_model=dict)
 async def get_place(place_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     place = await session.get(CanonicalPlace, place_id)
     if not place:
         raise HTTPException(status_code=404, detail="Place not found")
-    return PlaceResponse.model_validate(place)
+    resp = PlaceResponse.model_validate(place).model_dump(mode="json")
+    resp["images"] = (await get_entity_images(session, [place_id], limit=200)).get(place_id, [])
+    resp["chapters"] = await _get_linked_chapters(session, place_id, "place")
+    resp["source_excerpts"] = await _get_source_excerpts(session, place_id, CanonicalType.PLACE)
+    return resp
 
 
 @router.get("/{place_id}/support-links", response_model=list[SupportLinkResponse])

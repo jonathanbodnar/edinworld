@@ -90,6 +90,13 @@ export interface Place {
   summary: string | null
 }
 
+export interface EntityImage {
+  id: string
+  image_url: string
+  caption: string | null
+  alt_text: string | null
+}
+
 export interface CultureSummary {
   name: string
   source_count: number
@@ -108,6 +115,7 @@ export interface EpochOverview {
   total_events: number
   total_places: number
   total_images: number
+  featured_images: EntityImage[]
   chapters: Chapter[]
 }
 
@@ -211,6 +219,115 @@ export interface ChatMessage {
   created_at: string
 }
 
+export interface VideoScript {
+  id: string
+  entity_type: string
+  entity_id: string
+  video_type: string
+  title: string | null
+  raw_script: string | null
+  scenes_json: VideoScene[] | null
+  duration_target_seconds: number | null
+  version: number
+  is_current: boolean
+}
+
+export interface VideoScene {
+  name: string
+  tone: string
+  actors?: string[]
+  place?: string
+  event?: string
+  visual_prompt: string
+  narration: string
+  duration_estimate_seconds: number
+}
+
+export interface VideoOutput {
+  id: string
+  script_id: string
+  entity_type: string
+  entity_id: string
+  video_type: string
+  r2_key: string | null
+  thumbnail_r2_key: string | null
+  duration_seconds: number | null
+  resolution: string | null
+  file_size_bytes: number | null
+  version: number
+  is_current: boolean
+}
+
+export interface VideoStatus {
+  entity_type: string
+  entity_id: string
+  has_script: boolean
+  has_video: boolean
+  script: VideoScript | null
+  video: VideoOutput | null
+}
+
+export interface EntityDetail {
+  id: string
+  canonical_name: string
+  actor_type?: string
+  event_type?: string
+  place_type?: string
+  summary: string | null
+  time_start: number | null
+  time_end: number | null
+  merge_confidence: number | null
+  geo_hint_json?: Record<string, unknown> | null
+  images: EntityImage[]
+  chapters: {
+    id: string
+    title: string
+    time_start: number | null
+    time_end: number | null
+    focus_reason: string | null
+  }[]
+  source_excerpts: {
+    source_record_id: string
+    title: string | null
+    culture: string | null
+    category: string | null
+    excerpt: string
+    support_type: string
+    weight: number
+    dates: { date_type: string; date_start: number | null; date_end: number | null; date_label: string | null }[]
+  }[]
+}
+
+export interface ImageRecordDetail {
+  id: string
+  image_url: string | null
+  caption: string | null
+  image_type: string | null
+  original_image_url?: string
+  alt_text?: string
+  original_caption?: string
+  external_id?: string
+  source_url?: string
+  content_type?: string
+  record_title?: string
+  source_category?: string
+  culture?: string
+  language_family?: string
+  origin_place_name?: string
+  provenance_status?: string
+  metadata?: Record<string, unknown>
+  trusted_source_name?: string
+  trust_tier?: string
+  dates?: {
+    date_type: string
+    date_start: number | null
+    date_end: number | null
+    date_label: string | null
+    dating_confidence: string
+  }[]
+  text_excerpt?: string
+}
+
 export const api = {
   getEpochs: () => cachedGet<Epoch[]>('/epochs/'),
   getEpochOverview: (epochId: string) => cachedGet<EpochOverview>(`/epochs/${epochId}/overview`),
@@ -223,6 +340,7 @@ export const api = {
   getChapterContext: (id: string) => cachedGet<ContextSet[]>(`/chapters/${id}/context`),
   getChapterArtifacts: (id: string) => cachedGet<ArtifactSet[]>(`/chapters/${id}/artifacts`),
   getChapterImages: (id: string) => cachedGet<ImageSet[]>(`/chapters/${id}/images`),
+  getImageRecordDetail: (imageId: string) => cachedGet<ImageRecordDetail>(`/chapters/images/${imageId}/record`),
   getNarration: (chapterId: string) => cachedGet<NarrationPacket[]>(`/narration-packets/${chapterId}`),
   chatQuery: (query: string, chapterId?: string, sessionId?: string) =>
     request<ChatQueryResult>('/chat/query', {
@@ -231,6 +349,28 @@ export const api = {
         query,
         chapter_id: chapterId || null,
         session_id: sessionId || null,
+      }),
+    }),
+  getActorDetail: (id: string) => cachedGet<EntityDetail>(`/actors/${id}`),
+  getEventDetail: (id: string) => cachedGet<EntityDetail>(`/events/${id}`),
+  getPlaceDetail: (id: string) => cachedGet<EntityDetail>(`/places/${id}`),
+  getEntityDetail: (type: 'actor' | 'event' | 'place', id: string) => {
+    if (type === 'actor') return cachedGet<EntityDetail>(`/actors/${id}`)
+    if (type === 'event') return cachedGet<EntityDetail>(`/events/${id}`)
+    return cachedGet<EntityDetail>(`/places/${id}`)
+  },
+  getEntityVideo: (entityType: string, entityId: string) =>
+    cachedGet<VideoStatus>(`/videos/${entityType}/${entityId}`),
+  getScriptedChapterIds: () =>
+    cachedGet<string[]>('/videos/scripts/batch?entity_type=chapter'),
+  requestVideoGeneration: (entityType: string, entityId: string, videoType: string, scriptOnly = false) =>
+    request<{ status: string }>('/videos/generate', {
+      method: 'POST',
+      body: JSON.stringify({
+        entity_type: entityType,
+        entity_id: entityId,
+        video_type: videoType,
+        script_only: scriptOnly,
       }),
     }),
 }
