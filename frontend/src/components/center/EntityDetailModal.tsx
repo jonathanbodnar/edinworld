@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { api, EntityDetail } from '../../api'
+import { api } from '../../api'
+import type { EntityDetail } from '../../api'
 
 function formatYear(y: number | null): string {
   if (y === null) return '?'
