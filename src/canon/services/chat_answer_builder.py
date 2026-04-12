@@ -383,8 +383,8 @@ class ChatAnswerBuilder:
 
         return "\n".join(parts)
 
-    async def _call_ollama(self, prompt: str) -> dict:
-        """Call Ollama's OpenAI-compatible chat API and parse JSON response."""
+    def _call_ollama_sync(self, prompt: str) -> dict:
+        """Call Ollama's OpenAI-compatible chat API (sync, runs in thread)."""
         url = f"{settings.ollama_base_url.rstrip('/')}/v1/chat/completions"
         payload = {
             "model": settings.ollama_model,
@@ -395,19 +395,22 @@ class ChatAnswerBuilder:
             "temperature": 0.3,
             "max_tokens": 2048,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(url, json=payload)
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
 
         raw = data["choices"][0]["message"]["content"]
-        # Qwen3 may include <think>...</think> blocks; strip them
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-        # Extract JSON from possible markdown code fences
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
         raise ValueError(f"No JSON found in Ollama response: {raw[:200]}")
+
+    async def _call_ollama(self, prompt: str) -> dict:
+        """Async wrapper: runs sync Ollama call in a thread to avoid Docker+anyio issues."""
+        import asyncio
+        return await asyncio.to_thread(self._call_ollama_sync, prompt)
 
     async def _call_anthropic(self, prompt: str) -> dict:
         """Call Anthropic Claude with tool_use for structured answers."""
