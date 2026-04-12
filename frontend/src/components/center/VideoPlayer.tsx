@@ -4,8 +4,9 @@ import type { VideoScene } from '../../api'
 
 export default function VideoPlayer() {
   const ctx = useWorldContext()
-  const activeVideo = (ctx as Record<string, unknown>).chapterVideo as import('../../api').VideoStatus | null
-  const videoLoading = (ctx as Record<string, unknown>).videoLoading as boolean | undefined
+  const ctxAny = ctx as unknown as Record<string, unknown>
+  const activeVideo = ctxAny.chapterVideo as import('../../api').VideoStatus | null
+  const videoLoading = ctxAny.videoLoading as boolean | undefined
   const [expandedScene, setExpandedScene] = useState<number | null>(null)
   const [showAllScenes, setShowAllScenes] = useState(false)
 
