@@ -1,13 +1,15 @@
 """ChatAnswerBuilder: receives a user query, retrieves relevant evidence using
-text search across System A data and chapter bundles, calls Anthropic for a
-grounded answer, creates answer_packets with linked sources/context."""
+text search across System A data and chapter bundles, calls an LLM (Ollama or
+Anthropic) for a grounded answer, creates answer_packets with linked sources/context."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
 
+import httpx
 from sqlalchemy import Integer, func, or_, select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,8 +36,20 @@ Rules:
 - If the evidence is only partially relevant, answer what you can and note what's missing.
 - If NO evidence is relevant, explain what kinds of sources would be needed and suggest the user try different search terms.
 - Be conversational, concise, and scholarly.
+- Keep answers to 2-4 paragraphs maximum."""
 
-Respond using the provide_answer tool."""
+CHAT_SYSTEM_PROMPT_JSON = CHAT_SYSTEM_PROMPT + """
+
+You MUST respond with valid JSON in this exact format (no markdown, no extra text):
+{"answer": "your answer text", "confidence": 0.8, "answer_mode": "source", "referenced_source_indices": [0, 1], "referenced_context_indices": [0]}
+
+answer_mode must be one of: source, context, synthesis, unsupported
+- source = directly backed by primary sources
+- context = based on scholarly interpretation
+- synthesis = combines multiple sources
+- unsupported = insufficient evidence
+confidence is 0.0 to 1.0
+referenced_source_indices and referenced_context_indices are arrays of integers indexing into the provided sources/texts lists."""
 
 ANSWER_TOOL = {
     "name": "provide_answer",
@@ -115,6 +129,10 @@ class ChatAnswerBuilder:
             import anthropic
             self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         return self._client
+
+    @property
+    def _use_ollama(self) -> bool:
+        return bool(settings.ollama_base_url)
 
     async def answer_query(
         self,
@@ -365,6 +383,54 @@ class ChatAnswerBuilder:
 
         return "\n".join(parts)
 
+    async def _call_ollama(self, prompt: str) -> dict:
+        """Call Ollama's OpenAI-compatible chat API and parse JSON response."""
+        url = f"{settings.ollama_base_url.rstrip('/')}/v1/chat/completions"
+        payload = {
+            "model": settings.ollama_model,
+            "messages": [
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT_JSON},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+        raw = data["choices"][0]["message"]["content"]
+        # Qwen3 may include <think>...</think> blocks; strip them
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+        # Extract JSON from possible markdown code fences
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+        raise ValueError(f"No JSON found in Ollama response: {raw[:200]}")
+
+    async def _call_anthropic(self, prompt: str) -> dict:
+        """Call Anthropic Claude with tool_use for structured answers."""
+        try:
+            response = await self.client.messages.create(
+                model=settings.anthropic_model,
+                max_tokens=4096,
+                system=CHAT_SYSTEM_PROMPT,
+                tools=[ANSWER_TOOL],
+                tool_choice={"type": "tool", "name": "provide_answer"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "provide_answer":
+                    return block.input
+        except Exception:
+            logger.exception("Anthropic chat answer failed")
+        return {
+            "answer": "I encountered an error processing your question. Please try again.",
+            "confidence": 0.0,
+            "answer_mode": "unsupported",
+        }
+
     async def _call_llm_and_create_packet(
         self,
         session: AsyncSession,
@@ -377,33 +443,35 @@ class ChatAnswerBuilder:
 
         answer_data = {"answer": "", "confidence": 0.0, "answer_mode": "unsupported"}
 
-        if settings.anthropic_api_key:
+        if self._use_ollama:
             try:
-                response = await self.client.messages.create(
-                    model=settings.anthropic_model,
-                    max_tokens=4096,
-                    system=CHAT_SYSTEM_PROMPT,
-                    tools=[ANSWER_TOOL],
-                    tool_choice={"type": "tool", "name": "provide_answer"},
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                for block in response.content:
-                    if block.type == "tool_use" and block.name == "provide_answer":
-                        answer_data = block.input
-                        break
+                answer_data = await self._call_ollama(prompt)
+                logger.info("Ollama answered query: %s", query[:80])
             except Exception:
-                logger.exception("Anthropic chat answer failed")
+                logger.exception("Ollama chat answer failed, falling back to Anthropic")
+                answer_data = None
+
+            if answer_data is not None:
+                pass  # use ollama result
+            elif settings.anthropic_api_key:
+                answer_data = await self._call_anthropic(prompt)
+            else:
                 answer_data = {
                     "answer": "I encountered an error processing your question. Please try again.",
                     "confidence": 0.0,
                     "answer_mode": "unsupported",
                 }
+        elif settings.anthropic_api_key:
+            answer_data = await self._call_anthropic(prompt)
         else:
             answer_data = {
                 "answer": "AI answering is not configured. Evidence has been retrieved for manual review.",
                 "confidence": 0.0,
                 "answer_mode": "unsupported",
             }
+
+        if answer_data is None:
+            answer_data = {"answer": "", "confidence": 0.0, "answer_mode": "unsupported"}
 
         packet = AnswerPacket(
             id=uuid.uuid4(),
