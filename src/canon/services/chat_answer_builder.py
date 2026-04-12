@@ -383,19 +383,61 @@ class ChatAnswerBuilder:
 
         return "\n".join(parts)
 
+    def _trim_evidence_for_local(self, prompt: str) -> str:
+        """Reduce evidence size for local LLM -- keep top 5 sources, 5 contexts,
+        shorter excerpts to keep input tokens manageable."""
+        lines = prompt.split("\n")
+        trimmed = []
+        src_count = 0
+        ctx_count = 0
+        in_sources = False
+        in_contexts = False
+        skip_until_next = False
+
+        for line in lines:
+            if line.startswith("== Source Records =="):
+                in_sources = True
+                in_contexts = False
+                trimmed.append(line)
+                continue
+            if line.startswith("== Text Segments"):
+                in_sources = False
+                in_contexts = True
+                skip_until_next = False
+                trimmed.append(line)
+                continue
+
+            if in_sources and line.startswith("[Source "):
+                src_count += 1
+                skip_until_next = src_count > 5
+            if in_contexts and line.startswith("[Text "):
+                ctx_count += 1
+                skip_until_next = ctx_count > 5
+
+            if skip_until_next:
+                continue
+
+            if line.strip().startswith("Content:") and len(line) > 350:
+                trimmed.append(line[:350] + "...")
+            else:
+                trimmed.append(line)
+
+        return "\n".join(trimmed)
+
     def _call_ollama_sync(self, prompt: str) -> dict:
         """Call Ollama's OpenAI-compatible chat API (sync, runs in thread)."""
         url = f"{settings.ollama_base_url.rstrip('/')}/v1/chat/completions"
+        trimmed_prompt = self._trim_evidence_for_local(prompt)
         payload = {
             "model": settings.ollama_model,
             "messages": [
                 {"role": "system", "content": CHAT_SYSTEM_PROMPT_JSON},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": trimmed_prompt},
             ],
             "temperature": 0.3,
-            "max_tokens": 2048,
+            "max_tokens": 1024,
         }
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=300.0) as client:
             resp = client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
