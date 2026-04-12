@@ -32,6 +32,7 @@ async def chat_query(
         session,
         query=request.query,
         chapter_id=request.chapter_id,
+        epoch_id=request.epoch_id,
         session_id=request.session_id,
     )
     await session.commit()

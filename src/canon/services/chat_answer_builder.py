@@ -1,7 +1,7 @@
 """ChatAnswerBuilder: receives a user query, retrieves relevant evidence using
-text search across System A data and chapter bundles, calls an LLM (DeepSeek,
-Ollama, or Anthropic) for a grounded answer, creates answer_packets with linked
-sources/context."""
+PostgreSQL full-text search across source records, extracted text, and segments,
+calls DeepSeek (or Anthropic fallback) for a grounded answer, creates
+answer_packets with linked sources/context."""
 
 from __future__ import annotations
 
@@ -25,17 +25,17 @@ from src.canon.models.system_a import SAContextualStatement, SASegment, SASource
 logger = logging.getLogger(__name__)
 
 CHAT_SYSTEM_PROMPT = """You are a scholarly research assistant for an ancient history and mythology research platform called Edinworld.
-The platform contains source records, text segments, and contextual analysis from museums, text corpora, and historical archives.
+The platform contains primary source records, text segments, and contextual analysis from museums, text corpora, and historical archives worldwide.
 
-You answer questions using the provided source evidence: source records (with titles, culture, category) and text segments (actual content from these sources).
+You answer questions using ONLY the provided source evidence: source records (with titles, culture, category, excerpts) and text segments (actual content from these sources).
 
 Rules:
-- Use the evidence provided to construct the best answer you can.
+- Base your answer ONLY on the provided evidence. Do NOT add information from your own knowledge.
 - When referencing a source, mention it by title and culture.
 - Quote relevant text segments when they directly support a point.
 - If multiple sources disagree, present both perspectives.
 - If the evidence is only partially relevant, answer what you can and note what's missing.
-- If NO evidence is relevant, explain what kinds of sources would be needed and suggest the user try different search terms.
+- If NO evidence is relevant, say so and suggest the user try different search terms.
 - Be conversational, concise, and scholarly.
 - Keep answers to 2-4 paragraphs maximum."""
 
@@ -51,34 +51,6 @@ answer_mode must be one of: source, context, synthesis, unsupported
 - unsupported = insufficient evidence
 confidence is 0.0 to 1.0
 referenced_source_indices and referenced_context_indices are arrays of integers indexing into the provided sources/texts lists."""
-
-ANSWER_TOOL = {
-    "name": "provide_answer",
-    "description": "Provide an answer to the user's question based on the evidence.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "answer": {"type": "string", "description": "The answer text"},
-            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-            "answer_mode": {
-                "type": "string",
-                "enum": ["source", "context", "synthesis", "unsupported"],
-                "description": "source=directly backed by primary sources, context=based on scholarly interpretation, synthesis=combines multiple sources, unsupported=insufficient evidence",
-            },
-            "referenced_source_indices": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "Indices into the sources list that support this answer",
-            },
-            "referenced_context_indices": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "Indices into the contexts list that support this answer",
-            },
-        },
-        "required": ["answer", "confidence", "answer_mode"],
-    },
-}
 
 STOP_WORDS = {
     "the", "a", "an", "is", "was", "were", "are", "be", "been", "being",
@@ -96,28 +68,24 @@ STOP_WORDS = {
 
 
 def _extract_keywords(query: str) -> list[str]:
-    """Extract meaningful search keywords from a natural language query,
-    with basic stemming to improve ILIKE matching."""
+    """Extract meaningful search keywords, preserving original forms for ILIKE
+    and producing stemmed forms for tsquery."""
     words = re.findall(r"[a-zA-ZÀ-ÿ'ʼ]{2,}", query.lower())
     keywords = [w for w in words if w not in STOP_WORDS]
-
-    stemmed: list[str] = []
+    seen: list[str] = []
     for w in keywords:
-        stem = w
-        if stem.endswith("ies") and len(stem) > 4:
-            stem = stem[:-3] + "y"
-        elif stem.endswith("es") and len(stem) > 4:
-            stem = stem[:-2]
-        elif stem.endswith("s") and not stem.endswith("ss") and len(stem) > 3:
-            stem = stem[:-1]
-        if stem.endswith("ing") and len(stem) > 5:
-            stem = stem[:-3]
-        if stem not in stemmed:
-            stemmed.append(stem)
-        if w != stem and w not in stemmed:
-            stemmed.append(w)
+        if w not in seen:
+            seen.append(w)
+    return seen[:12]
 
-    return stemmed[:12]
+
+def _build_tsquery(keywords: list[str]) -> str:
+    """Build a PostgreSQL tsquery string from keywords using OR logic.
+    Each keyword is used with :* prefix matching for partial matches."""
+    if not keywords:
+        return ""
+    terms = [f"{kw}:*" for kw in keywords]
+    return " | ".join(terms)
 
 
 class ChatAnswerBuilder:
@@ -135,15 +103,12 @@ class ChatAnswerBuilder:
     def _use_deepseek(self) -> bool:
         return bool(settings.deepseek_api_key)
 
-    @property
-    def _use_ollama(self) -> bool:
-        return bool(settings.ollama_base_url)
-
     async def answer_query(
         self,
         session: AsyncSession,
         query: str,
         chapter_id: uuid.UUID | None = None,
+        epoch_id: uuid.UUID | None = None,
         session_id: uuid.UUID | None = None,
     ) -> dict:
         """Process a user query: retrieve evidence, call LLM, create answer packet."""
@@ -162,7 +127,9 @@ class ChatAnswerBuilder:
         )
         session.add(user_msg)
 
-        sources, contexts = await self._retrieve_evidence(session, query, chapter_id)
+        sources, contexts = await self._retrieve_evidence(
+            session, query, chapter_id=chapter_id, epoch_id=epoch_id
+        )
 
         if not sources and not contexts:
             answer_packet = await self._create_unsupported_packet(session, query, chapter_id)
@@ -209,55 +176,119 @@ class ChatAnswerBuilder:
         }
 
     async def _retrieve_evidence(
-        self, session: AsyncSession, query: str, chapter_id: uuid.UUID | None
+        self,
+        session: AsyncSession,
+        query: str,
+        chapter_id: uuid.UUID | None = None,
+        epoch_id: uuid.UUID | None = None,
     ) -> tuple[list[dict], list[dict]]:
-        """Query-aware evidence retrieval: searches source records by title/culture
-        and segments by text content, using keywords from the user's question."""
+        """Multi-strategy evidence retrieval:
+        1. Full-text search (GIN index) on source_records.tsv
+        2. Full-text search on source_versions.tsv (extracted text content)
+        3. Full-text search on segments (actual source passages)
+        4. ILIKE fallback for proper nouns that FTS might miss
+        """
         keywords = _extract_keywords(query)
         if not keywords:
             keywords = query.lower().split()[:5]
 
-        sources = await self._search_source_records(session, keywords, chapter_id)
-        contexts = await self._search_segments(session, keywords, chapter_id)
+        tsq = _build_tsquery(keywords)
+
+        # Parallel retrieval strategies, merged and deduplicated
+        sources_from_titles = await self._fts_source_records(session, tsq, keywords)
+        sources_from_text = await self._fts_source_versions(session, tsq, keywords)
+        contexts = await self._fts_segments(session, tsq, keywords)
+
+        # Merge source results, dedup by source_record_id, keep highest weight
+        seen: dict[uuid.UUID, dict] = {}
+        for s in sources_from_titles + sources_from_text:
+            sid = s["source_record_id"]
+            if sid not in seen or s["weight"] > seen[sid]["weight"]:
+                seen[sid] = s
+        sources = sorted(seen.values(), key=lambda x: x["weight"], reverse=True)[:15]
 
         return sources, contexts
 
-    async def _search_source_records(
-        self, session: AsyncSession, keywords: list[str], chapter_id: uuid.UUID | None
+    async def _fts_source_records(
+        self, session: AsyncSession, tsq: str, keywords: list[str]
     ) -> list[dict]:
-        """Search source_records by matching keywords against title, culture, and category."""
-        if chapter_id:
-            src_q = (
-                select(ChapterSourceSet)
-                .where(ChapterSourceSet.chapter_id == chapter_id)
-                .order_by(ChapterSourceSet.relevance_weight.desc())
-                .limit(15)
-            )
-            rows = (await session.execute(src_q)).scalars().all()
-            sources = []
-            for row in rows:
-                record = await session.get(SASourceRecord, row.source_record_id)
-                sources.append({
-                    "source_record_id": row.source_record_id,
-                    "title": row.title or (record.canonical_title if record else "Unknown"),
-                    "culture": record.culture if record else None,
-                    "excerpt": row.excerpt or "",
-                    "source_type": row.source_type,
-                    "weight": row.relevance_weight,
-                })
-            return sources
-
-        if not keywords:
+        """Search source_records using GIN full-text index on title+culture+origin."""
+        if not tsq:
             return []
 
-        match_cases = []
-        for kw in keywords:
-            pattern = f"%{kw}%"
-            match_cases.append(
-                func.coalesce(func.cast(SASourceRecord.canonical_title.ilike(pattern), Integer), 0)
-                + func.coalesce(func.cast(SASourceRecord.culture.ilike(pattern), Integer), 0)
-            )
-        relevance = sum(match_cases).label("relevance")
+        sql = sa_text("""
+            SELECT sr.id, sr.canonical_title, sr.culture, sr.source_category,
+                   ts_rank(sr.tsv, to_tsquery('english', :tsq)) as rank,
+                   LEFT(sv.text_extracted, 500) as excerpt
+            FROM source_records sr
+            LEFT JOIN LATERAL (
+                SELECT text_extracted FROM source_versions
+                WHERE source_record_id = sr.id AND text_extracted IS NOT NULL
+                LIMIT 1
+            ) sv ON true
+            WHERE sr.tsv @@ to_tsquery('english', :tsq)
+            ORDER BY rank DESC
+            LIMIT 15
+        """)
+        try:
+            rows = (await session.execute(sql, {"tsq": tsq})).fetchall()
+        except Exception:
+            logger.exception("FTS source_records query failed, falling back to ILIKE")
+            return await self._ilike_source_records(session, keywords)
+
+        return [
+            {
+                "source_record_id": row.id,
+                "title": row.canonical_title,
+                "culture": row.culture,
+                "excerpt": row.excerpt or "",
+                "source_type": row.source_category,
+                "weight": float(row.rank or 1),
+            }
+            for row in rows
+        ]
+
+    async def _fts_source_versions(
+        self, session: AsyncSession, tsq: str, keywords: list[str]
+    ) -> list[dict]:
+        """Search source_versions extracted text using GIN full-text index."""
+        if not tsq:
+            return []
+
+        sql = sa_text("""
+            SELECT sr.id, sr.canonical_title, sr.culture, sr.source_category,
+                   ts_rank(sv.tsv, to_tsquery('english', :tsq)) as rank,
+                   LEFT(sv.text_extracted, 500) as excerpt
+            FROM source_versions sv
+            JOIN source_records sr ON sr.id = sv.source_record_id
+            WHERE sv.tsv @@ to_tsquery('english', :tsq)
+            ORDER BY rank DESC
+            LIMIT 15
+        """)
+        try:
+            rows = (await session.execute(sql, {"tsq": tsq})).fetchall()
+        except Exception:
+            logger.exception("FTS source_versions query failed")
+            return []
+
+        return [
+            {
+                "source_record_id": row.id,
+                "title": row.canonical_title,
+                "culture": row.culture,
+                "excerpt": row.excerpt or "",
+                "source_type": row.source_category,
+                "weight": float(row.rank or 1),
+            }
+            for row in rows
+        ]
+
+    async def _ilike_source_records(
+        self, session: AsyncSession, keywords: list[str]
+    ) -> list[dict]:
+        """Fallback ILIKE search when FTS indexes aren't available."""
+        if not keywords:
+            return []
 
         any_conditions = []
         for kw in keywords:
@@ -266,20 +297,14 @@ class ChatAnswerBuilder:
             any_conditions.append(SASourceRecord.culture.ilike(pattern))
 
         q = (
-            select(SASourceRecord, relevance)
+            select(SASourceRecord)
             .where(or_(*any_conditions))
-            .order_by(relevance.desc())
             .limit(15)
         )
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q)).scalars().all()
 
         sources = []
-        seen: set[uuid.UUID] = set()
-        for rec, score in rows:
-            if rec.id in seen:
-                continue
-            seen.add(rec.id)
-
+        for rec in rows:
             excerpt = ""
             ver_q = (
                 select(SASourceVersion)
@@ -290,78 +315,74 @@ class ChatAnswerBuilder:
             ver = (await session.execute(ver_q)).scalar_one_or_none()
             if ver and ver.text_extracted:
                 excerpt = ver.text_extracted[:500]
-
             sources.append({
                 "source_record_id": rec.id,
                 "title": rec.canonical_title,
                 "culture": rec.culture,
                 "excerpt": excerpt,
                 "source_type": rec.source_category,
-                "weight": float(score or 1),
+                "weight": 1.0,
             })
-
         return sources
 
-    async def _search_segments(
-        self, session: AsyncSession, keywords: list[str], chapter_id: uuid.UUID | None
+    async def _fts_segments(
+        self, session: AsyncSession, tsq: str, keywords: list[str]
     ) -> list[dict]:
-        """Search segments by matching keywords against normalized_text, and
-        return them as context entries with actual text excerpts."""
-        if chapter_id:
-            ctx_q = (
-                select(ChapterContextSet)
-                .where(ChapterContextSet.chapter_id == chapter_id)
-                .order_by(ChapterContextSet.relevance_weight.desc())
-                .limit(10)
-            )
-            rows = (await session.execute(ctx_q)).scalars().all()
-            contexts = []
-            for row in rows:
-                stmt = await session.get(SAContextualStatement, row.contextual_statement_id)
-                contexts.append({
-                    "contextual_statement_id": row.contextual_statement_id,
-                    "summary": row.summary or (stmt.statement_text[:500] if stmt and stmt.statement_text else ""),
-                    "weight": row.relevance_weight,
-                })
-            return contexts
+        """Search segments using GIN full-text index on normalized_text."""
+        if not tsq:
+            return []
 
+        sql = sa_text("""
+            SELECT s.id, LEFT(s.normalized_text, 600) as excerpt,
+                   ts_rank(s.tsv, to_tsquery('english', :tsq)) as rank
+            FROM segments s
+            WHERE s.tsv @@ to_tsquery('english', :tsq)
+            ORDER BY rank DESC
+            LIMIT 15
+        """)
+        try:
+            rows = (await session.execute(sql, {"tsq": tsq})).fetchall()
+        except Exception:
+            logger.exception("FTS segments query failed, falling back to ILIKE")
+            return await self._ilike_segments(session, keywords)
+
+        return [
+            {
+                "contextual_statement_id": row.id,
+                "summary": row.excerpt or "",
+                "weight": float(row.rank or 1),
+            }
+            for row in rows
+        ]
+
+    async def _ilike_segments(
+        self, session: AsyncSession, keywords: list[str]
+    ) -> list[dict]:
+        """Fallback ILIKE search for segments."""
         if not keywords:
             return []
 
-        match_cases = []
-        for kw in keywords:
-            pattern = f"%{kw}%"
-            match_cases.append(
-                func.coalesce(func.cast(SASegment.normalized_text.ilike(pattern), Integer), 0)
-            )
-        relevance = sum(match_cases).label("relevance")
-
         any_conditions = []
         for kw in keywords:
-            pattern = f"%{kw}%"
-            any_conditions.append(SASegment.normalized_text.ilike(pattern))
+            any_conditions.append(SASegment.normalized_text.ilike(f"%{kw}%"))
 
         q = (
-            select(SASegment, relevance)
+            select(SASegment)
             .where(or_(*any_conditions))
             .where(SASegment.normalized_text.isnot(None))
             .where(SASegment.normalized_text != "")
-            .order_by(relevance.desc())
             .limit(15)
         )
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q)).scalars().all()
 
-        contexts = []
-        for seg, score in rows:
-            text = seg.normalized_text or seg.original_text or ""
-            excerpt = text[:600]
-            contexts.append({
+        return [
+            {
                 "contextual_statement_id": seg.id,
-                "summary": excerpt,
-                "weight": float(score or 1),
-            })
-
-        return contexts
+                "summary": (seg.normalized_text or seg.original_text or "")[:600],
+                "weight": 1.0,
+            }
+            for seg in rows
+        ]
 
     def _build_evidence_prompt(self, query: str, sources: list[dict], contexts: list[dict]) -> str:
         parts = [f"User question: {query}\n"]
@@ -374,7 +395,6 @@ class ChatAnswerBuilder:
                 if s.get("excerpt"):
                     parts.append(f"  Content: {s['excerpt'][:600]}")
                 parts.append(f"  Category: {s.get('source_type', 'unknown')}")
-                parts.append(f"  Relevance weight: {s.get('weight', 0)}")
                 parts.append("")
 
         if contexts:

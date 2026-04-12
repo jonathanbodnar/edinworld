@@ -340,6 +340,7 @@ class EpochOverviewResponse(BaseModel):
 class ChatQueryRequest(BaseModel):
     query: str
     chapter_id: uuid.UUID | None = None
+    epoch_id: uuid.UUID | None = None
     session_id: uuid.UUID | None = None
 
 
