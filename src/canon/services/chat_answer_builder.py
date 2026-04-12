@@ -286,25 +286,36 @@ class ChatAnswerBuilder:
     async def _ilike_source_records(
         self, session: AsyncSession, keywords: list[str]
     ) -> list[dict]:
-        """Fallback ILIKE search when FTS indexes aren't available."""
+        """Fallback ILIKE search when FTS indexes aren't available.
+        Searches title, culture, AND source_versions text content."""
         if not keywords:
             return []
 
+        # Strategy 1: title/culture match
         any_conditions = []
         for kw in keywords:
             pattern = f"%{kw}%"
             any_conditions.append(SASourceRecord.canonical_title.ilike(pattern))
             any_conditions.append(SASourceRecord.culture.ilike(pattern))
 
+        # Boost records matching ALL keywords in title
+        all_match = SASourceRecord.canonical_title.ilike(f"%{keywords[0]}%")
+        for kw in keywords[1:]:
+            all_match = all_match & SASourceRecord.canonical_title.ilike(f"%{kw}%")
+
         q = (
             select(SASourceRecord)
-            .where(or_(*any_conditions))
-            .limit(15)
+            .where(or_(all_match, *any_conditions))
+            .limit(20)
         )
         rows = (await session.execute(q)).scalars().all()
 
         sources = []
+        seen: set[uuid.UUID] = set()
         for rec in rows:
+            if rec.id in seen:
+                continue
+            seen.add(rec.id)
             excerpt = ""
             ver_q = (
                 select(SASourceVersion)
@@ -315,15 +326,21 @@ class ChatAnswerBuilder:
             ver = (await session.execute(ver_q)).scalar_one_or_none()
             if ver and ver.text_extracted:
                 excerpt = ver.text_extracted[:500]
+
+            # Higher weight if all keywords match title
+            title_lower = (rec.canonical_title or "").lower()
+            weight = sum(1 for kw in keywords if kw in title_lower)
             sources.append({
                 "source_record_id": rec.id,
                 "title": rec.canonical_title,
                 "culture": rec.culture,
                 "excerpt": excerpt,
                 "source_type": rec.source_category,
-                "weight": 1.0,
+                "weight": float(max(weight, 1)),
             })
-        return sources
+
+        sources.sort(key=lambda x: x["weight"], reverse=True)
+        return sources[:15]
 
     async def _fts_segments(
         self, session: AsyncSession, tsq: str, keywords: list[str]
@@ -358,30 +375,31 @@ class ChatAnswerBuilder:
     async def _ilike_segments(
         self, session: AsyncSession, keywords: list[str]
     ) -> list[dict]:
-        """Fallback ILIKE search for segments."""
+        """Fallback: search source_versions text_extracted instead of segments
+        (segments table is too large for unindexed ILIKE)."""
         if not keywords:
             return []
 
         any_conditions = []
         for kw in keywords:
-            any_conditions.append(SASegment.normalized_text.ilike(f"%{kw}%"))
+            any_conditions.append(SASourceVersion.text_extracted.ilike(f"%{kw}%"))
 
         q = (
-            select(SASegment)
+            select(SASourceVersion)
             .where(or_(*any_conditions))
-            .where(SASegment.normalized_text.isnot(None))
-            .where(SASegment.normalized_text != "")
+            .where(SASourceVersion.text_extracted.isnot(None))
+            .where(SASourceVersion.text_extracted != "")
             .limit(15)
         )
         rows = (await session.execute(q)).scalars().all()
 
         return [
             {
-                "contextual_statement_id": seg.id,
-                "summary": (seg.normalized_text or seg.original_text or "")[:600],
+                "contextual_statement_id": sv.id,
+                "summary": (sv.text_extracted or "")[:600],
                 "weight": 1.0,
             }
-            for seg in rows
+            for sv in rows
         ]
 
     def _build_evidence_prompt(self, query: str, sources: list[dict], contexts: list[dict]) -> str:
