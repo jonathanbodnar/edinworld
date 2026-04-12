@@ -34,9 +34,15 @@ from src.canon.models.chapter_image_set import ChapterImageSet
 from src.canon.models.chapter_focus_object import ChapterFocusObject
 from src.canon.models.chat_session import ChatSession, ChatMessage
 from src.canon.models.answer_packet import AnswerPacket, AnswerPacketSource, AnswerPacketContext
-from src.canon.models.video_script import VideoScript
-from src.canon.models.video_asset import VideoAsset
-from src.canon.models.video_output import VideoOutput
+
+try:
+    from src.canon.models.video_script import VideoScript
+    from src.canon.models.video_asset import VideoAsset
+    from src.canon.models.video_output import VideoOutput
+except ImportError:
+    VideoScript = None  # type: ignore[assignment,misc]
+    VideoAsset = None  # type: ignore[assignment,misc]
+    VideoOutput = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "Base",
