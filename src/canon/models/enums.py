@@ -85,6 +85,10 @@ class WorldJobType(str, enum.Enum):
     BUILD_NARRATION = "build_narration"
     BUILD_WORLD_PACKETS = "build_world_packets"
     UPDATE_CANON = "update_canon"
+    GENERATE_SCRIPT = "generate_script"
+    GENERATE_VISUALS = "generate_visuals"
+    GENERATE_AUDIO = "generate_audio"
+    ASSEMBLE_VIDEO = "assemble_video"
 
 
 class WorldJobStatus(str, enum.Enum):
@@ -122,3 +126,23 @@ class AnswerMode(str, enum.Enum):
     CONTEXT = "context"
     SYNTHESIS = "synthesis"
     UNSUPPORTED = "unsupported"
+
+
+class VideoType(str, enum.Enum):
+    CHAPTER_VIDEO = "chapter_video"
+    EVENT_VIDEO = "event_video"
+    CHARACTER_VIDEO = "character_video"
+
+
+class VideoAssetType(str, enum.Enum):
+    KEYFRAME = "keyframe"
+    MOTION_CLIP = "motion_clip"
+    NARRATION_AUDIO = "narration_audio"
+    AMBIENCE = "ambience"
+
+
+class VideoAssetStatus(str, enum.Enum):
+    PENDING = "pending"
+    GENERATING = "generating"
+    COMPLETED = "completed"
+    FAILED = "failed"

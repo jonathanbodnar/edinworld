@@ -2,8 +2,9 @@ import type { Chapter } from '../../api'
 import { useWorldContext } from '../../context/WorldContext'
 
 export default function ChapterItem({ chapter }: { chapter: Chapter }) {
-  const { activeChapterId, selectChapter, chapterLoading } = useWorldContext()
+  const { activeChapterId, selectChapter, chapterLoading, scriptedChapterIds } = useWorldContext()
   const isActive = activeChapterId === chapter.id
+  const hasScript = scriptedChapterIds.has(chapter.id)
 
   return (
     <button
@@ -31,11 +32,33 @@ export default function ChapterItem({ chapter }: { chapter: Chapter }) {
         fontSize: '11px',
         fontWeight: isActive ? 600 : 400,
         color: isActive ? 'var(--accent-hover)' : 'var(--text-secondary)',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
       }}>
-        {chapter.title}
+        <span style={{
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          flex: 1,
+        }}>
+          {chapter.title}
+        </span>
+        {hasScript && (
+          <span style={{
+            flexShrink: 0,
+            fontSize: '8px',
+            fontWeight: 700,
+            color: 'var(--accent)',
+            background: 'rgba(99, 102, 241, 0.12)',
+            padding: '1px 4px',
+            borderRadius: '3px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}>
+            Script
+          </span>
+        )}
       </div>
       {chapter.chapter_summary && (
         <div style={{

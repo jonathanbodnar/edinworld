@@ -18,6 +18,10 @@ from src.canon.models.chapter_context_set import ChapterContextSet
 from src.canon.models.chapter_focus_object import ChapterFocusObject
 from src.canon.models.chapter_image_set import ChapterImageSet
 from src.canon.models.chapter_source_set import ChapterSourceSet
+from src.canon.models.system_a import (
+    SAObjectImage, SARawObject, SASourceDate, SASourceRecord,
+    SASourceVersion, SATrustedSource,
+)
 from src.canon.schemas.canonical import (
     ActorResponse,
     ChapterArtifactSetResponse,
@@ -155,3 +159,89 @@ async def get_chapter_focus_objects(
         .order_by(ChapterFocusObject.display_order)
     )
     return [ChapterFocusObjectResponse.model_validate(r) for r in (await session.execute(q)).scalars().all()]
+
+
+@router.get("/images/{image_id}/record")
+async def get_image_record_detail(
+    image_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get full source record details for a chapter image (for the modal)."""
+    img_row = (await session.execute(
+        select(ChapterImageSet).where(ChapterImageSet.id == image_id)
+    )).scalar_one_or_none()
+    if not img_row:
+        raise HTTPException(404, "Image not found")
+
+    result: dict = {
+        "id": str(img_row.id),
+        "image_url": img_row.image_url,
+        "caption": img_row.caption,
+        "image_type": img_row.image_type,
+    }
+
+    if not img_row.object_image_id:
+        return result
+
+    obj_img = (await session.execute(
+        select(SAObjectImage).where(SAObjectImage.id == img_row.object_image_id)
+    )).scalar_one_or_none()
+    if not obj_img:
+        return result
+
+    result["original_image_url"] = obj_img.image_url
+    result["alt_text"] = obj_img.alt_text
+    result["original_caption"] = obj_img.caption
+
+    raw_obj = (await session.execute(
+        select(SARawObject).where(SARawObject.id == obj_img.raw_object_id)
+    )).scalar_one_or_none()
+
+    if raw_obj:
+        result["external_id"] = raw_obj.external_id
+        result["source_url"] = raw_obj.source_url
+        result["content_type"] = raw_obj.content_type
+
+        sr = (await session.execute(
+            select(SASourceRecord).where(SASourceRecord.raw_object_id == raw_obj.id)
+        )).scalar_one_or_none()
+
+        if sr:
+            result["record_title"] = sr.canonical_title
+            result["source_category"] = sr.source_category
+            result["culture"] = sr.culture
+            result["language_family"] = sr.language_family
+            result["origin_place_name"] = sr.origin_place_name
+            result["provenance_status"] = sr.provenance_status
+            result["metadata"] = sr.metadata_jsonb
+
+            ts = (await session.execute(
+                select(SATrustedSource).where(SATrustedSource.id == sr.trusted_source_id)
+            )).scalar_one_or_none()
+            if ts:
+                result["trusted_source_name"] = ts.name
+                result["trust_tier"] = ts.trust_tier
+
+            dates = (await session.execute(
+                select(SASourceDate).where(SASourceDate.source_record_id == sr.id)
+            )).scalars().all()
+            if dates:
+                result["dates"] = [
+                    {
+                        "date_type": d.date_type,
+                        "date_start": d.date_start,
+                        "date_end": d.date_end,
+                        "date_label": d.date_label,
+                        "dating_confidence": d.dating_confidence,
+                    }
+                    for d in dates
+                ]
+
+            version = (await session.execute(
+                select(SASourceVersion).where(SASourceVersion.source_record_id == sr.id).limit(1)
+            )).scalar_one_or_none()
+            if version:
+                text = version.text_extracted or ""
+                result["text_excerpt"] = text[:2000] if len(text) > 2000 else text
+
+    return result

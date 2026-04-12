@@ -20,15 +20,73 @@ from src.canon.models.enums import CanonicalType
 logger = logging.getLogger(__name__)
 
 DEFAULT_EPOCHS = [
-    {"title": "Primordial / Creation", "time_start": None, "time_end": -5000},
-    {"title": "Early Dynastic", "time_start": -5000, "time_end": -2900},
-    {"title": "Akkadian Period", "time_start": -2900, "time_end": -2154},
-    {"title": "Ur III / Neo-Sumerian", "time_start": -2154, "time_end": -2004},
-    {"title": "Old Babylonian", "time_start": -2004, "time_end": -1595},
-    {"title": "Middle Period", "time_start": -1595, "time_end": -1000},
-    {"title": "Neo-Assyrian / Neo-Babylonian", "time_start": -1000, "time_end": -539},
-    {"title": "Late Period / Hellenistic", "time_start": -539, "time_end": 0},
-    {"title": "Undated / Mythic", "time_start": None, "time_end": None},
+    {
+        "title": "The Beginning — Creation of the World",
+        "time_start": None, "time_end": None,
+        "summary": "How the world began according to every ancient tradition: "
+                   "Sumerian, Egyptian, Hebrew, Hindu, Chinese, Greek, Norse, "
+                   "Zoroastrian, Mayan, and countless others.",
+    },
+    {
+        "title": "Age of the Gods",
+        "time_start": None, "time_end": None,
+        "summary": "When the gods walked the earth, established divine order, "
+                   "and shaped the cosmos across every ancient civilization.",
+    },
+    {
+        "title": "Before the Flood — The Antediluvian World",
+        "time_start": None, "time_end": None,
+        "summary": "The world before the great deluge: antediluvian rulers, "
+                   "patriarchs, ancient sages, and the first races.",
+    },
+    {
+        "title": "The Great Flood",
+        "time_start": None, "time_end": None,
+        "summary": "The near-universal flood narrative from over 200 cultures: "
+                   "Ziusudra, Noah, Manu, Deucalion, Nüwa, and more.",
+    },
+    {
+        "title": "Dawn of Civilization",
+        "time_start": -12000, "time_end": -5000,
+        "summary": "The earliest built structures and settlements. "
+                   "Göbekli Tepe, Çatalhöyük, earliest agriculture.",
+    },
+    {
+        "title": "Rise of the First Cities",
+        "time_start": -5000, "time_end": -3000,
+        "summary": "Eridu, Uruk, first Sumerian city-states. "
+                   "Pre-dynastic Egypt. Early Indus settlements.",
+    },
+    {
+        "title": "Age of Empires",
+        "time_start": -3000, "time_end": -2000,
+        "summary": "Akkadian Empire, Egyptian Old Kingdom, Indus Valley, "
+                   "Ur III dynasty. The first great empires.",
+    },
+    {
+        "title": "Age of Heroes",
+        "time_start": -2000, "time_end": -1200,
+        "summary": "Hammurabi's Babylon, Egyptian New Kingdom, Hittites, "
+                   "Shang Dynasty, Mycenaean Greece, the Trojan War.",
+    },
+    {
+        "title": "Age of Iron and Prophets",
+        "time_start": -1200, "time_end": -500,
+        "summary": "Neo-Assyrian/Neo-Babylonian empires, Hebrew prophets, "
+                   "Zhou Dynasty, Homer's Greece, Zoroaster.",
+    },
+    {
+        "title": "The Classical World",
+        "time_start": -500, "time_end": 100,
+        "summary": "The Axial Age: Buddha, Confucius, Greek philosophers, "
+                   "Alexander, Maurya Empire, Rome, Qin/Han dynasties.",
+    },
+    {
+        "title": "Undated Traditions",
+        "time_start": None, "time_end": None,
+        "summary": "Oral traditions, myths, and accounts that cannot be "
+                   "placed in a specific time period.",
+    },
 ]
 
 CHAPTER_BAND_SIZE = 500
@@ -59,6 +117,7 @@ class ChapterBuilderService:
                 title=ep_def["title"],
                 time_start=ep_def["time_start"],
                 time_end=ep_def["time_end"],
+                summary=ep_def.get("summary"),
                 version=1,
                 is_current=True,
             )

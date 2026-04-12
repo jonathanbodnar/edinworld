@@ -34,6 +34,9 @@ from src.canon.models.chapter_image_set import ChapterImageSet
 from src.canon.models.chapter_focus_object import ChapterFocusObject
 from src.canon.models.chat_session import ChatSession, ChatMessage
 from src.canon.models.answer_packet import AnswerPacket, AnswerPacketSource, AnswerPacketContext
+from src.canon.models.video_script import VideoScript
+from src.canon.models.video_asset import VideoAsset
+from src.canon.models.video_output import VideoOutput
 
 __all__ = [
     "Base",
@@ -75,4 +78,7 @@ __all__ = [
     "AnswerPacket",
     "AnswerPacketSource",
     "AnswerPacketContext",
+    "VideoScript",
+    "VideoAsset",
+    "VideoOutput",
 ]

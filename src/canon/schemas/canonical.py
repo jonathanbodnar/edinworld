@@ -12,6 +12,7 @@ class EpochResponse(BaseModel):
     time_start: int | None = None
     time_end: int | None = None
     summary: str | None = None
+    epoch_order: int = 0
     confidence_profile_json: dict | None = None
     version: int
     is_current: bool
@@ -317,6 +318,13 @@ class CultureSummary(BaseModel):
     explorable: bool = False
 
 
+class EntityImage(BaseModel):
+    id: str
+    image_url: str
+    caption: str | None = None
+    alt_text: str | None = None
+
+
 class EpochOverviewResponse(BaseModel):
     epoch: EpochWithCountResponse
     cultures: list[CultureSummary] = []
@@ -325,6 +333,7 @@ class EpochOverviewResponse(BaseModel):
     total_events: int = 0
     total_places: int = 0
     total_images: int = 0
+    featured_images: list[EntityImage] = []
     chapters: list[ChapterResponse] = []
 
 
@@ -413,3 +422,58 @@ class SynthesisResponse(BaseModel):
 
 
 ChapterDetailResponse.model_rebuild()
+
+
+# ── Video Pipeline Schemas ──────────────────────────────────────────────────
+
+class VideoScriptResponse(BaseModel):
+    id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    video_type: str
+    title: str | None = None
+    raw_script: str | None = None
+    scenes_json: list | None = None
+    duration_target_seconds: int | None = None
+    claude_model: str | None = None
+    version: int
+    is_current: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class VideoOutputResponse(BaseModel):
+    id: uuid.UUID
+    script_id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    video_type: str
+    r2_key: str | None = None
+    thumbnail_r2_key: str | None = None
+    duration_seconds: int | None = None
+    resolution: str | None = None
+    file_size_bytes: int | None = None
+    version: int
+    is_current: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class VideoStatusResponse(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    has_script: bool = False
+    has_video: bool = False
+    script: VideoScriptResponse | None = None
+    video: VideoOutputResponse | None = None
+
+
+class VideoGenerateRequest(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    video_type: str = "chapter_video"
+    script_only: bool = False

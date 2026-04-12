@@ -14,4 +14,5 @@ class CanonicalEpoch(UUIDPrimaryKeyMixin, VersionedMixin, TimestampMixin, Base):
     time_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     time_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    epoch_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     confidence_profile_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

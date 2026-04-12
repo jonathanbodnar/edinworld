@@ -19,10 +19,16 @@ from src.canon.models.chapter_image_set import ChapterImageSet
 from src.canon.models.chapter_source_set import ChapterSourceSet
 from src.canon.models.enums import CanonicalType
 from src.canon.models.system_a import SASourceRecord
+from src.canon.api.routes.entity_images import (
+    discover_images_for_culture,
+    get_entity_images,
+    get_epoch_images,
+)
 from src.canon.schemas.canonical import (
     ActorResponse,
     ChapterResponse,
     CultureSummary,
+    EntityImage,
     EpochOverviewResponse,
     EpochResponse,
     EpochWithCountResponse,
@@ -44,7 +50,7 @@ async def list_epochs(
     q = (
         select(CanonicalEpoch)
         .where(CanonicalEpoch.is_current.is_(True))
-        .order_by(CanonicalEpoch.time_start.asc().nullslast())
+        .order_by(CanonicalEpoch.epoch_order.asc())
         .limit(limit)
         .offset(offset)
     )
@@ -205,6 +211,12 @@ async def get_epoch_overview(
             **counts,
         ))
 
+    featured_raw = await get_epoch_images(
+        session, chapter_ids, limit=20,
+        time_start=epoch.time_start, time_end=epoch.time_end,
+    )
+    featured_images = [EntityImage(**img) for img in featured_raw]
+
     return EpochOverviewResponse(
         epoch=epoch_resp,
         cultures=cultures,
@@ -213,6 +225,7 @@ async def get_epoch_overview(
         total_events=len(event_ids),
         total_places=len(place_ids),
         total_images=total_images,
+        featured_images=featured_images,
         chapters=chapter_responses,
     )
 
@@ -308,11 +321,31 @@ async def get_epoch_culture_detail(
         for i in images_raw
     ]
 
+    # If no chapter-linked images, discover directly by culture
+    if not images and culture_name != "Unknown":
+        direct_imgs = await discover_images_for_culture(session, culture_name, limit=20)
+        images = [
+            {"id": img["id"], "image_url": img["image_url"], "caption": img["caption"], "image_type": "artifact"}
+            for img in direct_imgs
+        ]
+
+    all_entity_ids_for_images = actor_ids + event_ids + place_ids
+    entity_image_map = await get_entity_images(session, all_entity_ids_for_images, limit=6)
+
+    def enrich(entities, ids):
+        result = []
+        for e in entities:
+            d = e.model_dump(mode="json")
+            eid = uuid.UUID(d["id"])
+            d["images"] = entity_image_map.get(eid, [])
+            result.append(d)
+        return result
+
     return {
         "culture": culture_name,
-        "actors": [a.model_dump(mode="json") for a in actors],
-        "events": [e.model_dump(mode="json") for e in events],
-        "places": [p.model_dump(mode="json") for p in places],
+        "actors": enrich(actors, actor_ids),
+        "events": enrich(events, event_ids),
+        "places": enrich(places, place_ids),
         "sources": sources,
         "images": images,
     }

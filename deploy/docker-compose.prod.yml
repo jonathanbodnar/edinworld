@@ -3,7 +3,7 @@ version: "3.9"
 services:
   world-migrate:
     build:
-      context: .
+      context: ..
       target: migrate
     networks:
       - eden_default
@@ -18,7 +18,7 @@ services:
 
   world-api:
     build:
-      context: .
+      context: ..
       target: api
     restart: always
     depends_on:
@@ -41,7 +41,7 @@ services:
 
   world-worker:
     build:
-      context: .
+      context: ..
       target: worker
     restart: always
     depends_on:
@@ -61,7 +61,7 @@ services:
 
   world-frontend:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile.frontend
     restart: always
     depends_on:

@@ -12,6 +12,7 @@ from src.canon.workers.canon_update_worker import CanonUpdateWorker
 from src.canon.workers.chapter_build_worker import ChapterBuildWorker
 from src.canon.workers.knowledge_prep_worker import KnowledgePrepWorker
 from src.canon.workers.narration_worker import NarrationWorker
+from src.canon.workers.video_worker import VideoFullWorker, VideoScriptWorker
 from src.canon.workers.world_packet_worker import WorldPacketWorker
 
 logging.basicConfig(
@@ -27,6 +28,8 @@ WORKER_CLASSES = {
     "narration": NarrationWorker,
     "world_packet": WorldPacketWorker,
     "canon_update": CanonUpdateWorker,
+    "video_script": VideoScriptWorker,
+    "video_full": VideoFullWorker,
 }
 
 

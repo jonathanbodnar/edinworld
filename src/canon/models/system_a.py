@@ -29,6 +29,7 @@ class SASourceRecord(Base):
     __table_args__ = {"extend_existing": True}
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    trusted_source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     raw_object_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     canonical_title: Mapped[str] = mapped_column(String(2048))
     source_category: Mapped[str] = mapped_column(String(64))

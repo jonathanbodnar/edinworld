@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, type React
 import type {
   Epoch, EpochOverview, CultureDetail,
   ChapterDetail, SourceSet, ContextSet, ArtifactSet, ImageSet, NarrationPacket,
+  VideoStatus,
 } from '../api'
 import { api } from '../api'
 
@@ -25,12 +26,21 @@ interface WorldState {
   images: ImageSet[]
   narration: NarrationPacket | null
   chapterLoading: boolean
+
+  activeEntityType: 'chapter' | 'event' | 'actor' | 'place' | null
+  activeEntityId: string | null
+  chapterVideo: VideoStatus | null
+  activeVideo: VideoStatus | null
+  videoLoading: boolean
+
+  scriptedChapterIds: Set<string>
 }
 
 interface WorldContextValue extends WorldState {
   selectEpoch: (id: string) => Promise<void>
   selectCulture: (name: string | null) => Promise<void>
   selectChapter: (id: string) => Promise<void>
+  selectEntity: (type: 'chapter' | 'event' | 'actor' | 'place', id: string) => Promise<void>
   clearSelection: () => void
 }
 
@@ -59,14 +69,26 @@ const INITIAL: WorldState = {
   images: [],
   narration: null,
   chapterLoading: false,
+  activeEntityType: null,
+  activeEntityId: null,
+  chapterVideo: null,
+  activeVideo: null,
+  videoLoading: false,
+  scriptedChapterIds: new Set(),
 }
 
 export function WorldProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<WorldState>(INITIAL)
 
   useEffect(() => {
-    api.getEpochs()
-      .then(epochs => setState(prev => ({ ...prev, epochs, epochsLoading: false })))
+    Promise.all([
+      api.getEpochs(),
+      api.getScriptedChapterIds().catch(() => [] as string[]),
+    ])
+      .then(([epochs, scriptIds]) => setState(prev => ({
+        ...prev, epochs, epochsLoading: false,
+        scriptedChapterIds: new Set(scriptIds),
+      })))
       .catch(err => {
         console.error('Failed to load epochs:', err)
         setState(prev => ({ ...prev, epochsLoading: false }))
@@ -87,6 +109,8 @@ export function WorldProvider({ children }: { children: ReactNode }) {
       artifacts: [],
       images: [],
       narration: null,
+      chapterVideo: null,
+      activeVideo: null,
     }))
     try {
       const overview = await api.getEpochOverview(id)
@@ -129,6 +153,11 @@ export function WorldProvider({ children }: { children: ReactNode }) {
         if (narrations.length > 0) narration = narrations[0]
       } catch { /* narration may not exist yet */ }
 
+      let videoStatus: VideoStatus | null = null
+      try {
+        videoStatus = await api.getEntityVideo('chapter', id)
+      } catch { /* video may not exist yet */ }
+
       setState(prev => ({
         ...prev,
         activeChapterId: id,
@@ -139,10 +168,30 @@ export function WorldProvider({ children }: { children: ReactNode }) {
         images,
         narration,
         chapterLoading: false,
+        activeEntityType: 'chapter',
+        activeEntityId: id,
+        chapterVideo: videoStatus,
+        activeVideo: videoStatus,
       }))
     } catch (err) {
       console.error('Failed to load chapter:', err)
       setState(prev => ({ ...prev, chapterLoading: false }))
+    }
+  }, [])
+
+  const selectEntity = useCallback(async (type: 'chapter' | 'event' | 'actor' | 'place', id: string) => {
+    setState(prev => ({
+      ...prev,
+      activeEntityType: type,
+      activeEntityId: id,
+      videoLoading: true,
+      activeVideo: null,
+    }))
+    try {
+      const video = await api.getEntityVideo(type, id)
+      setState(prev => ({ ...prev, activeVideo: video, videoLoading: false }))
+    } catch {
+      setState(prev => ({ ...prev, videoLoading: false }))
     }
   }, [])
 
@@ -160,11 +209,15 @@ export function WorldProvider({ children }: { children: ReactNode }) {
       artifacts: [],
       images: [],
       narration: null,
+      activeEntityType: null,
+      activeEntityId: null,
+      chapterVideo: null,
+      activeVideo: null,
     }))
   }, [])
 
   return (
-    <WorldCtx.Provider value={{ ...state, selectEpoch, selectCulture, selectChapter, clearSelection }}>
+    <WorldCtx.Provider value={{ ...state, selectEpoch, selectCulture, selectChapter, selectEntity, clearSelection }}>
       {children}
     </WorldCtx.Provider>
   )

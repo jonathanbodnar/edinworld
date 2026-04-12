@@ -4,11 +4,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.canon.api.routes import (
     actors, admin, changes, chapters, chat, epochs, events, motifs,
-    narration, places, scores, timeline, world_packets,
+    narration, places, scores, timeline, videos, world_packets,
 )
 from src.canon.config import settings
 
-CACHE_PREFIXES = ("/epochs", "/chapters", "/actors", "/events", "/places", "/timeline", "/scores", "/narration-packets", "/world-packets")
+CACHE_PREFIXES = ("/epochs", "/chapters", "/actors", "/events", "/places", "/timeline", "/scores", "/narration-packets", "/world-packets", "/videos")
 
 
 class CacheHeaderMiddleware(BaseHTTPMiddleware):
@@ -48,6 +48,7 @@ app.include_router(narration.router, prefix="/narration-packets", tags=["Narrati
 app.include_router(world_packets.router, prefix="/world-packets", tags=["World Packets"])
 app.include_router(changes.router, prefix="/canon/changes", tags=["Changes"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(videos.router, prefix="/videos", tags=["Videos"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 
